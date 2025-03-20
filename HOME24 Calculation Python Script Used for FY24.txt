@@ -1,0 +1,404 @@
+#♡HUD/CPD/OPS/SDED: HOME Calculation in Python!
+#♡
+#♡ Written by Abu Zuberi, September 2022
+#♡ Updated by Abu Zuberi, May 2024
+#♡ This program takes CPD-SDED's "MERGE" database
+#♡ and outputs HOME Allocations.
+#♡
+#♡ Modified code by Gregory Miller (PD&R) to correct threshold adjustment for grantees funded under 500K, February 2023
+#♡
+#♡ Updated by Michael McCoy (Guidehouse), February 2024:
+#♡     Removed duplicative filtering of Home Types, fixed Pro Rata reduction to properly floor values at 500k, 
+#♡     added RSMEANS to output, created dynamic rounding adjustments for largest entitlement / non-entitlement grantees
+#♡     Included a function to output Runtime Notes to Notepad
+#♡     Removed recalculation of MEANS for State Total population
+#♡
+#♡ Updated by Dwight Jefferson (HUD-CPD), for Fiscal year 24 in April 2024.
+ 
+## User Input (): Set Output Folder/Filename:
+OutputFolder = 'J:/COMS/HOME/HOME24/Calculation Files'
+OutputFilename = 'HOME24.xlsx'
+RuntimeNotes = r"J:/COMS/HOME/HOME24/Calculation Files/HOME FY24 Runtime Notes.txt"
+## User Input: Set MERGE location
+MERGELocation = 'J:/COMS/MERGE/MERGE FY24/MERGE.xlsx'
+MERGEPopYear= "POP22"
+PovRentHousProbYear= "P50RHP"
+RSMEANSYear = "MEANS23"
+ 
+ 
+## User Input: Set Funding Amounts and Allocation Requirements:
+HTotal =  1250000000 #total funding # If this is less than 1B500K the Non-enditled PJ reduction threshold should be 350K.
+HInsular= HTotal * .002 #Insular Set Aside
+PJ_funding= (HTotal-HInsular) * .60 # % of Total-insular to PJs
+State_balance_funding= (HTotal-HInsular)* .32 # % of Total-insular to State Balance
+State_total_funding= (HTotal-HInsular)* .08 # % of Total-insular to State Balance
+National_Vacancy_Rate = .056088 # National Vacancy Rate
+National_PCI = 37638  # National Per Capita Income
+Nat_PCI_3_Person_HH_Pov = 21559 # National Per Capita Income for 3 Person HH below the poverty threshold
+NonEntitled_PJ_Threshold= 335000 # threshold for HOME# with no Year Prior funding.
+NonEntitled_PJ_Reduction_Threshold = 500000 #threshold for PJ reduction to account for FundingforStatesWithoutPJs
+State_Funding_Minimum = 3000000  # State Minimum
+FundingforStatesWithoutPJs = 500000 # Funding for States without PJs, DC is a state for HOME
+ 
+# import Pandas numerical analysis plug-ins, import time for timer:
+import time
+start_time = time.time()
+import pandas as pd
+## Tell Pandas not to truncate when printing:
+pd.options.display.max_columns = 50
+pd.options.display.max_rows = 50
+import numpy as np
+pd.options.mode.chained_assignment = None  # default='warn'
+ 
+with open(RuntimeNotes, 'w') as f:
+    print("HUD/CPD/OPS/SDED: HOME Calculation in Python!", file = f)
+    print("", file = f)
+    print("Running HOME...", file = f)
+    print("", file = f)
+f.close()
+ 
+# Find MERGE HOME records for Calc
+MERGE=pd.DataFrame(pd.read_excel(MERGELocation,converters={'HOMETY':str,'HOMEHPL':str,'ST':str,'CO':str, 'UC':str,'MA':str,'RGN':str,'FO':str,'CYCLE':str, 'AGL':str}))
+MERGE = MERGE.loc[(MERGE['HOMEFLAG'] == "H")]
+Nat_PCI_3_Person_HH_Pov=(Nat_PCI_3_Person_HH_Pov/3)
+MERGE["CNSRT"] = MERGE["CNSRT"].fillna("")
+ 
+## Rename Columns
+MERGE.rename(columns={MERGEPopYear:"POP"},inplace = True)
+MERGE.rename(columns={PovRentHousProbYear:"PxxRHP"},inplace = True)
+MERGE.rename(columns={RSMEANSYear:"MEANS"},inplace = True)
+ 
+#HOME Formula Factors and Weights
+ 
+Factor1="AVACRATRP"
+Factor1f0="FORM0AVACRATRP"
+Factor1weight=.1
+ 
+Factor2="TRHC4"
+Factor2f0="FORM0TRHC4"
+Factor2weight=.2
+ 
+Factor3="PxxRHP"
+Factor3f0="FORM0PxxRHP"
+Factor3weight=.2
+ 
+Factor4="amTrHC4"
+Factor4f0= "FORM0amTrHC4"
+Factor4weight=.2
+ 
+Factor5="PCI"
+Factor5f0= "FORM0PCI"
+Factor5weight=.1
+ 
+Factor6="FAMPOV"
+Factor6f0= "FORM0FAMPOV"
+Factor6weight=.2
+ 
+FormulaVariables= [Factor1, Factor2, Factor3, Factor4, Factor5, Factor6]
+FactorFunding = [Factor1f0, Factor2f0, Factor3f0, Factor4f0, Factor5f0, Factor6f0]
+ 
+FormulaWeightsText= ["Factor1weight", "Factor2weight", "Factor3weight", "Factor4weight","Factor5weight", "Factor6weight"]
+FormulaWeights= [Factor1weight, Factor2weight, Factor3weight, Factor4weight,Factor5weight, Factor6weight]
+ 
+##assign Formula Fields MERGE
+MERGE[FactorFunding] = 0 
+MERGE[FormulaWeightsText] = FormulaWeights
+MERGE[Factor1] = 0 
+MERGE[Factor4] = 0
+ 
+## Clear Formula Data
+ 
+MERGE["TYPE"]=""
+MERGE["FORM0"] = 0 
+MERGE["FORM0PRadj"] = 0 
+MERGE["NOCITYINC"] = 0 
+MERGE["NOCITYADJ"] = 0 
+MERGE["FORMX"] = 0 
+MERGE["KEY"] = MERGE["ST"]+MERGE["HOMEHPL"]
+MERGE["POPPCI"]=MERGE["POPACS"]*MERGE["PCI"]
+MERGE["POPMEANS"]=MERGE["POPACS"]*MERGE["MEANS"]
+ 
+## Define unique list of formula variables to aggregate:
+NumericalColumns = [ 'POP', 'POPACS', "TRH",'TRHPOV' ,'POV', 'POVU', 'OCROWD', 'PRE40', 'POPMEANS', 'POPPCI',  "RENTOCC", "VACRENT", "FAMPOVU"]
+MERGE.fillna(0)
+ 
+# Find 60 Series to Calc Non-CNSRT Counties Xseries
+x6090 = MERGE.loc[(MERGE['HOMETY'] == "61")|(MERGE['HOMETY'] == "62")|(MERGE['HOMETY'] == "63")&(MERGE['UC'] == "4")|(MERGE['HOMETY'] == "64")&(MERGE['UC'] == "3")|(MERGE['HOMETY'] == "64")&(MERGE['UC'] == "4")|(MERGE['HOMETY'] == "91")|(MERGE['HOMETY'] == "92")|(MERGE['HOMETY'] == "9P")]
+x6090 = x6090[['KEY', 'STA','ST','HOMEFLAG','HOMEHPL','HOMETY', 'CNSRT', 'UC']+NumericalColumns+FormulaVariables]
+ 
+## Find non-participating and participating whole place parts negative.
+x6090.loc[x6090['HOMETY'] == '62', NumericalColumns+FormulaVariables] = (-x6090.loc[x6090['HOMETY'] == '62', NumericalColumns+FormulaVariables])
+x6090.loc[x6090['HOMETY'] == '64', NumericalColumns+FormulaVariables] = (-x6090.loc[x6090['HOMETY'] == '64', NumericalColumns+FormulaVariables])
+##Get 66 series 
+xTY66 = x6090.loc[(x6090['HOMETY'] == "61")|(x6090['HOMETY'] == "62")|(x6090['HOMETY'] == "63")|(x6090['HOMETY'] == "64")]
+## Group and sum using .sum().reset_index() to prevent future Key Errors. 
+xTY66= xTY66[['KEY', 'STA','ST', 'HOMEFLAG','HOMEHPL','CNSRT']+NumericalColumns+FormulaVariables].groupby(['KEY', 'STA','ST', 'HOMEFLAG','HOMEHPL', 'CNSRT']).sum().reset_index()
+xTY66= xTY66.loc[xTY66['CNSRT'] == '']
+ 
+#Find TY 90 Series Values
+xTY90= x6090.loc[(x6090['CNSRT'] != "")]
+xTY90= xTY90[['KEY','HOMEFLAG', "CNSRT"]+NumericalColumns+FormulaVariables].groupby(['CNSRT', 'HOMEFLAG']).sum().reset_index()
+#Find TY 90 Series by State
+xTY90xST= x6090.loc[(x6090['CNSRT'] != "")]
+xTY90xST= xTY90xST[['KEY','STA','ST','HOMEFLAG','CNSRT']+NumericalColumns+FormulaVariables].groupby(['STA','ST','CNSRT']).sum().reset_index()
+ 
+# Make Calculation sheet as subset of MERGE
+PJs = MERGE.loc[(MERGE['HOMETY'] == "61")&(MERGE['CNSRT'] == "")|(MERGE['HOMETY'] == "90")].reset_index()
+xTY66= pd.merge(PJs.drop(columns = NumericalColumns+FormulaVariables), xTY66[['KEY']+NumericalColumns+FormulaVariables], on = "KEY")
+xTY90= pd.merge(PJs.drop(columns = NumericalColumns+FormulaVariables), xTY90[['CNSRT']+NumericalColumns+FormulaVariables], on = "CNSRT")
+## Re-pull just the cities
+PJs = MERGE.loc[(MERGE['HOMETY'] == "51")|(MERGE['HOMETY'] == "52")].reset_index()
+PJs = pd.concat([PJs, xTY66])
+PJs = pd.concat([PJs, xTY90])
+ 
+x90 = MERGE.loc[MERGE['HOMETY'] == "90"]
+x90 = x90[['CNSRT', 'MEANS']]
+ 
+x60 = MERGE.loc[(MERGE['HOMETY'] == "61") & (MERGE['CNSRT']=="")]
+x60 = x60[['ST','HOMEHPL', 'MEANS']]
+ 
+x22 = MERGE.loc[MERGE['HOMETY'] == "21"]
+x22 = x22[['ST','HOMEHPL', 'MEANS']]
+x22['HOMETY'] = "22"
+ 
+#Recalculate some formula factor variables:
+PJs["MEANS"] = PJs["POPMEANS"]/PJs["POPACS"]
+PJs = PJs.merge(x90, how='left', on=['CNSRT'], suffixes=('', '_new'))
+PJs['MEANS'] = np.where(pd.notnull(PJs['MEANS_new']), PJs['MEANS_new'], PJs['MEANS'])
+PJs.drop('MEANS_new', axis=1, inplace=True)
+ 
+PJs = PJs.merge(x60, how='left', on=['ST','HOMEHPL'], suffixes=('', '_new'))
+PJs['MEANS'] = np.where(pd.notnull(PJs['MEANS_new']), PJs['MEANS_new'], PJs['MEANS'])
+PJs.drop('MEANS_new', axis=1, inplace=True)
+ 
+PJs["PCI"]=PJs["POPPCI"]/PJs["POPACS"]
+PJs["PCI"] = ((National_PCI-Nat_PCI_3_Person_HH_Pov)*PJs["POPACS"])/(PJs["PCI"] - Nat_PCI_3_Person_HH_Pov)
+PJs["AVACRATRP"] = (National_Vacancy_Rate/(PJs["VACRENT"]/(PJs["RENTOCC"]+PJs["VACRENT"])))*PJs["TRHPOV"]
+PJs["amTrHC4"]=PJs["MEANS"]*PJs["TRHC4"]
+PJs.replace([np.inf, -np.inf], 0, inplace=True)
+ 
+ 
+ 
+#Calculate Formula 0 i.e. "FairShare":
+PJs[FactorFunding]  = PJs[FormulaVariables] / PJs[FormulaVariables] .sum()
+PJs[FactorFunding] = PJs[FactorFunding] * FormulaWeights
+PJs[FactorFunding] = PJs[FactorFunding]* PJ_funding
+PJs["FORM0"] = PJs[FactorFunding].sum(axis=1)
+## Calculate PR Adjustment. PR Municipios are capped at 2 x the National FORM0 per rental housing unit (TRH).
+NatTRHForm0 =  PJs["FORM0"].sum() / PJs["TRH"].sum()
+NatTRHForm0 = NatTRHForm0 * 2
+PJs.loc[PJs['STA'] == 'PR', ['FORM0PRadj']] = (NatTRHForm0) * PJs.loc[PJs['STA'] == 'PR', ['TRH']].to_numpy()
+PJs.loc[(PJs['STA'] == 'PR')&(PJs['FORM0PRadj']>PJs['FORM0']), ['FORM0PRadj']] = PJs.loc[(PJs['STA'] == 'PR')&(PJs['FORM0PRadj']>PJs['FORM0']), ['FORM0']].to_numpy()
+PJs.loc[PJs['STA'] != 'PR', ['FORM0PRadj']]=   PJs.loc[PJs['STA'] != 'PR', ['FORM0']].to_numpy() 
+#PJs.loc[(PJs['STA'] != 'PR') | (PJs['FORM0PRadj'] == PJs['FORM0']), ['FORM0PRadj']]  =  PJs.loc[(PJs['STA'] != 'PR')| (PJs['FORM0PRadj'] == PJs['FORM0']), ['FORM0PRadj']].to_numpy()  *  ( (PJ_funding -  PJs[(PJs['FORM0PRadj'] != PJs['FORM0'])]['FORM0PRadj'].sum())/ (PJs['FORM0PRadj'].sum()   -  PJs[(PJs['FORM0PRadj'] != PJs['FORM0'])]['FORM0PRadj'].sum() ) )
+ 
+## Roll-up UGLGs: Successive rounds to drop each non grandfathered UGLG below the threshold.
+PJs["NOCITYINC"]=PJs["FORM0PRadj"]
+PJs["YRPRIOR"] = PJs["YRPRIOR"].fillna(0)
+PJnoGrandfatherMin = (PJs.loc[(PJs['YRPRIOR']==0)&(PJs['NOCITYINC']!=0),  ['NOCITYINC']].min()).sum()
+MyCount = 0 
+RollupLoopStartTime = time.time()
+while PJnoGrandfatherMin <= NonEntitled_PJ_Threshold:
+    PJs.loc[PJs['NOCITYINC'] == PJnoGrandfatherMin, ['NOCITYINC']] = 0 
+    PJs["NOCITYINC"] = PJs["NOCITYINC"] * ( PJ_funding / PJs["NOCITYINC"].sum() )
+    PJnoGrandfatherMin = (PJs.loc[(PJs['YRPRIOR']==0)&(PJs['NOCITYINC']!=0),  ['NOCITYINC']].min()).sum()
+    MyCount += 1
+    if MyCount > 9999:
+        with open(RuntimeNotes, 'a') as f:
+            print("", file = f)
+            print("ErrorMsg: Whoops! I had an issue dropping UGLGs", file = f)
+            print("", file = f)
+        f.close()
+        break
+RollupLoopEndTime = time.time()
+ 
+with open(RuntimeNotes, 'a') as f:
+    print(MyCount, end = ' ', file = f)
+    print("UGLGs dropped in %s seconds" % round((RollupLoopEndTime - RollupLoopStartTime),3), file = f)
+f.close()
+ 
+#Calculate State Totals:
+StateTot = MERGE.loc[(MERGE['HOMETY'] == "21")]
+StateTot['HOMETY']="22"
+ 
+##Recalculate some formula factor variables:
+StateTot["PCI"]=StateTot["POPPCI"]/StateTot["POPACS"]
+StateTot["PCI"] = ((National_PCI-Nat_PCI_3_Person_HH_Pov)*StateTot["POPACS"])/(StateTot["PCI"] - Nat_PCI_3_Person_HH_Pov)
+StateTot["AVACRATRP"] = (National_Vacancy_Rate/(StateTot["VACRENT"]/(StateTot["RENTOCC"]+StateTot["VACRENT"])))*StateTot["TRHPOV"]
+StateTot["amTrHC4"]=StateTot["MEANS"]*StateTot["TRHC4"]
+ 
+#Calculate Formula 0 i.e. "FairShare":
+StateTot[FactorFunding]  = StateTot[FormulaVariables] / StateTot[FormulaVariables] .sum()
+StateTot[FactorFunding] = StateTot[FactorFunding] * FormulaWeights
+StateTot[FactorFunding] = StateTot[FactorFunding]* State_total_funding
+StateTot["FORM0"] = StateTot[FactorFunding].sum(axis=1)
+ 
+#### DO PR ADJUST
+NatTRHForm0 =  StateTot["FORM0"].sum() / StateTot["TRH"].sum()
+NatTRHForm0 = NatTRHForm0 * 2
+StateTot.loc[StateTot['STA'] == 'PR', ['FORM0PRadj']] = (NatTRHForm0) * StateTot.loc[StateTot['STA'] == 'PR', ['TRH']].to_numpy()
+StateTot.loc[(StateTot['STA'] == 'PR')&(StateTot['FORM0PRadj']>StateTot['FORM0']), ['FORM0PRadj']] = StateTot.loc[(StateTot['STA'] == 'PR')&(StateTot['FORM0PRadj']>StateTot['FORM0']), ['FORM0']].to_numpy()
+StateTot.loc[StateTot['STA'] != 'PR', ['FORM0PRadj']]=   StateTot.loc[StateTot['STA'] != 'PR', ['FORM0']].to_numpy() 
+StateTot.loc[StateTot['STA'] != 'PR', ['FORM0PRadj']]  =  StateTot.loc[StateTot['STA'] != 'PR', ['FORM0PRadj']].to_numpy()  *  ( (State_total_funding -  StateTot[StateTot['STA']=="PR"]['FORM0PRadj'].sum())/ (StateTot['FORM0PRadj'].sum()   -  StateTot[StateTot['STA']=="PR"]['FORM0PRadj'].sum() ) )
+ 
+# Do State Balance Calc 
+StateBalance = MERGE.loc[(MERGE['HOMETY'] == "21")]
+#Mark Funding on TY90 records
+for x in (xTY90xST["CNSRT"]):
+    xTY90xST.loc[(xTY90xST['CNSRT'] == x, ['NOCITYINC'])] =  (PJs.loc[(PJs['CNSRT'] == x, ['NOCITYINC'])].to_numpy())
+#Subtract PJs from States
+for x in (StateBalance["ST"]):
+    (StateBalance.loc[((StateBalance['ST'] == x)&(StateBalance['HOMETY'] == "21"), NumericalColumns+FormulaVariables)]) -= (PJs.loc[((PJs['ST'] == x)&(PJs['NOCITYINC'] != 0)&(PJs['HOMETY'] != "90"), NumericalColumns+FormulaVariables)].sum().to_numpy())  
+    (StateBalance.loc[((StateBalance['ST'] == x)&(StateBalance['HOMETY'] == "21"), NumericalColumns+FormulaVariables)]) -=  (xTY90xST.loc[((xTY90xST['ST'] == x)&(xTY90xST['NOCITYINC'] >= 0), NumericalColumns+FormulaVariables)].sum().to_numpy())  
+##Recalculate some formula factor variables:
+StateBalance["MEANS"] = StateBalance["POPMEANS"]/StateBalance["POPACS"]
+StateBalance["PCI"]=StateBalance["POPPCI"]/StateBalance["POPACS"]
+StateBalance["PCI"] = ((National_PCI-Nat_PCI_3_Person_HH_Pov)*StateBalance["POPACS"])/(StateBalance["PCI"] - Nat_PCI_3_Person_HH_Pov)
+StateBalance["AVACRATRP"] = (National_Vacancy_Rate/(StateBalance["VACRENT"]/(StateBalance["RENTOCC"]+StateBalance["VACRENT"])))*StateBalance["TRHPOV"]
+StateBalance["amTrHC4"]=StateBalance["MEANS"]*StateBalance["TRHC4"]
+ 
+#Calculate Formula 0 i.e. "FairShare":
+StateBalance[FactorFunding]  = StateBalance[FormulaVariables] / StateBalance[FormulaVariables] .sum()
+StateBalance[FactorFunding] = StateBalance[FactorFunding] * FormulaWeights
+StateBalance[FactorFunding] = StateBalance[FactorFunding]* State_balance_funding
+StateBalance["FORM0"] = StateBalance[FactorFunding].sum(axis=1)
+ 
+#### DO PR ADJUST
+NatTRHForm0 =  StateBalance["FORM0"].sum() / StateBalance["TRH"].sum()
+NatTRHForm0 = NatTRHForm0 * 2
+StateBalance.loc[StateBalance['STA'] == 'PR', ['FORM0PRadj']] = (NatTRHForm0) * StateBalance.loc[StateBalance['STA'] == 'PR', ['TRH']].to_numpy()
+StateBalance.loc[(StateBalance['STA'] == 'PR')&(StateBalance['FORM0PRadj']>StateBalance['FORM0']), ['FORM0PRadj']] = StateBalance.loc[(StateBalance['STA'] == 'PR')&(StateBalance['FORM0PRadj']>StateBalance['FORM0']), ['FORM0']].to_numpy()
+StateBalance.loc[StateBalance['STA'] != 'PR', ['FORM0PRadj']]=   StateBalance.loc[StateBalance['STA'] != 'PR', ['FORM0']].to_numpy() 
+StateBalance.loc[StateBalance['STA'] != 'PR', ['FORM0PRadj']]  =  StateBalance.loc[StateBalance['STA'] != 'PR', ['FORM0PRadj']].to_numpy()  *  ( (State_balance_funding-  StateBalance[StateBalance['STA']=="PR"]['FORM0PRadj'].sum())/ (StateBalance['FORM0PRadj'].sum()   -  StateBalance[StateBalance['STA']=="PR"]['FORM0PRadj'].sum() ) )
+ 
+####  Add nocity inc in TY22 
+StateTot["NOCITYINC"]= StateBalance["POPACS"] - StateTot["POPACS"] 
+StateTot.loc[StateTot['NOCITYINC'] ==  0, ['NOCITYINC']] = FundingforStatesWithoutPJs
+StateTot.loc[StateTot['NOCITYINC'] <  0, ['NOCITYINC']] =  0
+ 
+# Add State Amounts together in TY21 (State Balance)
+StateBalance["NOCITYINC"]=StateTot["FORM0PRadj"]+StateBalance["FORM0PRadj"]
+ 
+#pro rata reduction for NoCityInc to PJs > 500000 and no PJs should be reduced below that amount.
+##smallest grantee to be reduced
+adj_amt= 0
+MyCount= 0
+PJs["FORMX"]=PJs["NOCITYINC"]
+aMinGrantee = PJs[(PJs['FORMX']>NonEntitled_PJ_Reduction_Threshold)]['FORMX'].min()
+aTotReductionPJs = ( PJs[(PJs['FORMX']>NonEntitled_PJ_Reduction_Threshold)]['FORMX'].sum()  - StateTot["NOCITYINC"].sum()) / PJs[(PJs['FORMX']>NonEntitled_PJ_Reduction_Threshold)]['FORMX'].sum()
+ 
+while (aTotReductionPJs*aMinGrantee) < NonEntitled_PJ_Reduction_Threshold:
+    adj_amt += aMinGrantee- NonEntitled_PJ_Reduction_Threshold
+    (PJs.loc[PJs['FORMX'] == aMinGrantee, ['FORMX']]) = NonEntitled_PJ_Reduction_Threshold 
+    aTotReductionPJs = ( PJs[(PJs['FORMX']>NonEntitled_PJ_Reduction_Threshold)]['FORMX'].sum()  - StateTot["NOCITYINC"].sum()) / (PJs[(PJs['FORMX']>NonEntitled_PJ_Reduction_Threshold)]['FORMX'].sum() - adj_amt)
+    aMinGrantee = PJs[(PJs['FORMX']>aMinGrantee)]['FORMX'].min()    
+    MyCount += 1
+    if MyCount > 9999:
+        with open(RuntimeNotes, 'a') as f:
+            print("", file = f)
+            print("ErrorMsg: Whoops! I had an issue at pro-rata reductions.", file = f)
+            print("", file = f)
+        f.close()
+        break
+ 
+PJs.loc[PJs['FORMX']>NonEntitled_PJ_Reduction_Threshold,['FORMX']] =  PJs.loc[PJs['FORMX']>NonEntitled_PJ_Reduction_Threshold,['FORMX']]*aTotReductionPJs
+ 
+# Move All States to State Minimum (Abu Alternative Code)
+StateBalance["FORMX"]=StateBalance["NOCITYINC"]
+StateBalance.loc[StateBalance['FORMX'] <  State_Funding_Minimum, ['FORMX']]= State_Funding_Minimum
+TotRealloc = StateBalance.loc[StateBalance['FORMX'] ==  State_Funding_Minimum, 'FORMX'].sum() - StateBalance.loc[StateBalance['FORMX'] ==  State_Funding_Minimum, 'NOCITYINC'].sum() 
+TotAboveMin=((StateBalance["FORMX"]-State_Funding_Minimum).sum())
+TotReduction=  StateBalance["FORMX"].sum() - State_total_funding - State_balance_funding
+StateBalance.loc[StateBalance['FORMX'] >  State_Funding_Minimum, ['FORMX']] = StateBalance.loc[StateBalance['FORMX'] >  State_Funding_Minimum, ['FORMX']] * (StateBalance.loc[StateBalance['FORMX'] >  State_Funding_Minimum, 'FORMX'].sum() - TotRealloc) / StateBalance.loc[StateBalance['FORMX'] >  State_Funding_Minimum, 'FORMX'].sum()
+ 
+StateBalance["FORMX"] += StateTot["NOCITYINC"]
+ 
+#Rekey State Balance
+StateBalance["KEY"] =StateBalance["ST"]+"9999"
+ 
+#Bring it all together
+USAHOME = pd.concat([StateBalance,StateTot, PJs])
+ 
+# Format for Report
+USAHOME["PCI"]=USAHOME["POPPCI"]/USAHOME["POPACS"]
+USAHOME = ( USAHOME.loc[:,["KEY","RGN","FO","NAME","STA","TYPE", "HOMETY", "FORMX", "NOCITYINC", "FORM0PRadj","FORM0","YRPRIOR", "MEANS", "CNSRT", "HOMEHPL", "ST",]+NumericalColumns+FormulaVariables+FactorFunding].sort_values(by=('KEY')))
+USAHOME.rename(columns={'PxxRHP':PovRentHousProbYear, "POP": MERGEPopYear },inplace = True)
+USAHOME["FORMX"] = USAHOME["FORMX"].round(0) #GH Updated to only round FORMX
+ 
+# Make Rounding Adjustments to Largest Entitlement and Largest Non-Entitlement
+PJ_funding =  PJ_funding - USAHOME[(USAHOME['HOMETY']=="22")]['NOCITYINC'].sum()
+State_balance_funding = State_balance_funding +  USAHOME[(USAHOME['HOMETY']=="22")]['NOCITYINC'].sum()
+USAHOME["FORMX"] = USAHOME["FORMX"].round(0) #GH Updated to only round FORMX
+ 
+# Identify largest jurisdictions for rounding adjustments
+largest_entitlement = USAHOME.loc[USAHOME["HOMETY"]!="21",["FORMX"]].max().sum()
+largest_non_entitlement = USAHOME.loc[USAHOME["HOMETY"]=="21",["FORMX"]].max().sum()
+largest_entitlement_key = USAHOME.loc[USAHOME["FORMX"] == largest_entitlement,["KEY"]].max().sum()
+largest_non_entitlement_key = USAHOME.loc[USAHOME["FORMX"] == largest_non_entitlement,["KEY"]].max().sum()
+largest_entitlement_state = USAHOME.loc[USAHOME["KEY"] == largest_entitlement_key, "NAME"].sum()
+largest_non_entitlement_state = USAHOME.loc[USAHOME["KEY"] == largest_non_entitlement_key, "NAME"].sum()
+ 
+EntitlementRoundingAmt=  PJ_funding - (USAHOME[USAHOME['HOMETY']!="21"]['FORMX'].sum())
+USAHOME.loc[USAHOME['KEY'] == largest_entitlement_key, ['FORMX']] -= (USAHOME[USAHOME['HOMETY']!="21"]['FORMX'].sum()) - PJ_funding
+NonEntitlementRoundingAmt =  State_balance_funding+State_total_funding -(USAHOME[USAHOME['HOMETY']=="21"]['FORMX'].sum())
+USAHOME.loc[USAHOME['KEY'] == largest_non_entitlement_key, ['FORMX']] -= (USAHOME[USAHOME['HOMETY']=="21"]['FORMX'].sum()) - State_balance_funding-State_total_funding
+ 
+ 
+# Include RsMEANS in output
+#GH Updated to remove need to update variables Year over year 3/21
+#GH Updated to properly pull MEANS for all HOMETY
+#USAHOME["MEANS"] = USAHOME["POPMEANS"]/USAHOME["POPACS"]   #OPS UPDATE 3/21   #GH removed 3/21 as MEANS is brought in using actual values from MERGE
+ 
+USAHOME = USAHOME.merge(x22, how='left', on=['ST','HOMETY'], suffixes=('','_new'))   #OPS UPDATE 3/21  #GH Updated to remove the need to udpate variables YOY
+USAHOME['MEANS'] = np.where(pd.notnull(USAHOME['MEANS']), USAHOME['MEANS'], USAHOME['MEANS'])   #OPS UPDATE 3/21  #GH Updated to remove the need to udpate variables YOY
+USAHOME.drop('MEANS', axis=1, inplace=True)   #OPS UPDATE 3/21  #GH Updated to remove the need to udpate variables YOY
+ 
+USAHOME = USAHOME.merge(x90, how='left', on=['CNSRT'], suffixes=('', '_new'))   #OPS UPDATE 3/21  #GH Updated to remove the need to udpate variables YOY
+USAHOME['MEANS'] = np.where(pd.notnull(USAHOME['MEANS_new']), USAHOME['MEANS_new'], USAHOME['MEANS'])   #OPS UPDATE 3/21  #GH Updated to remove the need to udpate variables YOY
+USAHOME.drop('MEANS_new', axis=1, inplace=True)   #OPS UPDATE 3/21  #GH Updated to remove the need to udpate variables YOY
+ 
+USAHOME = USAHOME.merge(x60, how='left', on=['ST','HOMEHPL'], suffixes=('', '_new'))   #OPS UPDATE 3/21  #GH Updated to remove the need to udpate variables YOY
+USAHOME['MEANS'] = np.where(pd.notnull(USAHOME['MEANS_new']), USAHOME['MEANS_new'], USAHOME['MEANS'])   #OPS UPDATE 3/21  #GH Updated to remove the need to udpate variables YOY
+USAHOME.drop('MEANS_new', axis=1, inplace=True)   #OPS UPDATE 3/21  #GH Updated to remove the need to udpate variables YOY
+#USAHOME["MEANS"] = USAHOME["MEANS"]   #OPS UPDATE 3/21  #GH Removed 3/21
+ 
+USAHOME["MEANS"] = np.where(pd.isnull(USAHOME["MEANS"]), USAHOME["POPMEANS"]/USAHOME["POPACS"], USAHOME["MEANS"]) #GH added to add back MEANS
+USAHOME.rename(columns={"MEANS" : RSMEANSYear}, inplace=True)
+ 
+USAHOME.drop('CNSRT', axis=1, inplace=True)
+USAHOME.drop('ST', axis=1, inplace=True)
+USAHOME.drop('HOMEHPL', axis=1, inplace=True)
+USAHOME.drop('HOMEHPL_new', axis=1, inplace=True)
+USAHOME.drop('POPPCI', axis =1, inplace=True)
+USAHOME.drop('POPMEANS', axis=1, inplace=True)
+#USAHOME.drop('MEANSxx', axis=1, inplace=True)   #OPS UPDATE 3/21  #GH Removed 3/21
+ 
+ 
+#name types:
+USAHOME.loc[USAHOME['HOMETY'] == '22', ['TYPE']] = "State Total"
+USAHOME.loc[USAHOME['HOMETY'] == '21', ['TYPE']] = "State Non-entitlement"
+USAHOME.loc[USAHOME['HOMETY'] == '51', ['TYPE']] = "Principal City"
+USAHOME.loc[USAHOME['HOMETY'] == '52', ['TYPE']] = "Metro City"
+USAHOME.loc[USAHOME['HOMETY'] == '61', ['TYPE']] = "Urban County"
+USAHOME.loc[USAHOME['HOMETY'] == '90', ['TYPE']] = "Consortia"
+ 
+#USAHOME= USAHOME.loc[(USAHOME["FORMX"] > 0) | (USAHOME["HOMETY"] == '22')]     #OPS UPDATE 3/21 #No updated needed
+ 
+with open(RuntimeNotes, 'a') as f:
+    print("", file = f)
+    print(largest_entitlement_state+" - Largest Entitlement Adjustment= $"+(EntitlementRoundingAmt).astype(str), file = f)
+    print(largest_non_entitlement_state+" - Largest Non-Entitlement Adjustment= $"+(NonEntitlementRoundingAmt).astype(str), file = f)
+    print("", file = f)
+    print("Exported to Excel at: "+OutputFolder+OutputFilename, file = f)
+    print("", file = f)
+    print("Runtime ~ %s seconds" % round((time.time() - start_time),3), file = f)
+    print("", file = f)
+    print("HOMErun Complete!", file = f)
+f.close()
+ 
+ 
+#Remove file if exists in path, open after exporting. 
+import os
+#os.remove(OutputFolder+OutputFilename)  # delete existing file
+USAHOME.to_excel(OutputFolder+OutputFilename, index=False, sheet_name='HOME24_Calc')
+os.system("open -a 'Microsoft Excel.app' '%s'" % OutputFolder+OutputFilename) # open file
