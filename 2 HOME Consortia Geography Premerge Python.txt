@@ -1,0 +1,747 @@
+###########################################################   The purpose of this program is to create the preMERGE records for HOME forula allocations.
+###########################################################
+
+
+## User Input (): Set Output Folder/Filename:
+OutputFolder =  'C:/Users/H45562/Desktop/New folder/' ## Ends with /
+OutputFilename = 'HOME CNSRT PreMerge.xlsx'
+
+## User Input () Set Input File Locations
+MERGE_Location = 'J:/COMS/MERGE/MERGE FY24/MERGE24.xlsx'
+OMBList1_Location='J:/COMS/Data and Program Library/OMB Data/2023 July/list1_2023.xlsx'
+OMBList2_Location= 'J:/COMS/Data and Program Library/OMB Data/2023 July/list2_2023.xlsx'
+Census_Population_Estimates_File_Location= 'J:/COMS/POP/2023/sub-est2023.csv'
+CPD_Field_Office_by_County_File_Location='J:/COMS/Data and Program Library/CPD Field Office Data/Field Office By County.xlsx'
+HUD_locality_Codes_list_location='J:/COMS/POP/HLC_LIST.xlsx'
+
+import pandas as pd
+import numpy as np  # Import NumPy
+
+# Import data with appropriate converters and skiprows (adjust as needed)
+try:
+    MERGE = pd.read_excel(MERGE_Location, converters={'CDBGTY': str, 'CDBGHPL': str, 'ST': str, 'CO': str, 'UC': str, 'MA': str, 'RGN': str, 'FO': str, 'CYCLE': str, 'AGL': str})
+except FileNotFoundError:
+    print(f"Error: MERGE file not found at {MERGE_Location}")
+    exit()
+
+try:
+    OMBList1 = pd.read_excel(OMBList1_Location, converters={'CBSA Code': str, 'Metropolitan Division Code': str, 'FIPS State Code': str, 'FIPS County Code': str}, skiprows=2)  # Skip first 2 rows
+except FileNotFoundError:
+    print(f"Error: OMB List 1 file not found at {OMBList1_Location}")
+    exit()
+
+try:
+    OMBList2 = pd.read_excel(OMBList2_Location, converters={'CBSA Code': str, 'FIPS State Code': str, 'FIPS Place Code': str}, skiprows=2)  # Skip first 2 rows
+except FileNotFoundError:
+    print(f"Error: OMB List 2 file not found at {OMBList2_Location}")
+    exit()
+
+try:
+    Pop = pd.read_csv(Census_Population_Estimates_File_Location, converters={'SUMLEV': str, 'STATE': str, 'COUNTY': str, 'PLACE': str, 'COUSUB': str, 'CONCIT': str, 'PRIMGEO_FLAG': str}, engine='python', encoding='latin1')
+except FileNotFoundError:
+    print(f"Error: Census Population file not found at {Census_Population_Estimates_File_Location}")
+    exit()
+
+try:
+    CPDxFOxCounty = pd.read_excel(CPD_Field_Office_by_County_File_Location, converters={'ROFO': str, 'STFIPS': str, 'COUNTY': str})
+except FileNotFoundError:
+    print(f"Error: CPD Field Office x County file not found at {CPD_Field_Office_by_County_File_Location}")
+    exit()
+
+
+try:
+    HLC_LIST = pd.read_excel(HUD_locality_Codes_list_location, converters={'ST&Place': str, 'FSC': str, 'FPC': str, 'HLC': str})
+except FileNotFoundError:
+    print(f"Error: MERGE file not found at {HUD_locality_Codes_list_location}")
+    exit()
+
+# Rename column in HLC_LIST to match PREMERGECITIES for the merge
+HLC_LIST = HLC_LIST.rename(columns={"FIPSKEY": "FIPSKEY","ST&Place": "FIPSKEY"})
+
+
+# MCD States - List of States where Minor Civil Division are known to serve as units of general local government
+MCD_States = ["CT", "ME", "MA", "MI", "MN", "NH", "NJ", "NY", "PA", "RI", "VT", "WI"]
+
+
+# this list excludes Nashville-Davidson metropolitan government (balance), TN; Washington city, DC; Athens-Clarke County unified government (balance), GA; Augusta-Richmond County consolidated government (balance), GA; Columbus city, GA; Urban Honolulu CDP, HI; Indianapolis city (balance), IN; Lexington-Fayette urban county, KY; Louisville/Jefferson County metro government (balance), KY; Baton Rouge city, LA; Houma city, LA; Lafayette city, LA; Baltimore city, MD
+CitiesToSkip= ('4752006','1150000','1303440','1304204','1319000','1571550','1836003','2146027','2148006','2205000','2236255','2240735','2404000', '2203399990','2299990', '2205599990')
+
+Field_Office_Codes_ = {
+    ('01', '01'): 'Boston',
+    ('01', '26'): 'Hartford',
+    ('02', '01'): 'New York City',
+    ('02', '06'): 'Buffalo',
+    ('02', '39'): 'Newark',
+    ('03', '01'): 'Philadelphia',
+    ('03', '06'): 'Baltimore',
+    ('03', '28'): 'Pittsburgh',
+    ('03', '36'): 'Richmond',
+    ('03', '39'): 'Washington D.C.',
+    ('04', '01'): 'Atlanta',
+    ('04', '09'): 'Birmingham',
+    ('04', '14'): 'Miami',
+    ('04', '16'): 'Columbia',
+    ('04', '19'): 'Greensboro',
+    ('04', '26'): 'Jackson',
+    ('04', '29'): 'Jacksonville',
+    ('04', '36'): 'Louisville',
+    ('04', '37'): 'Knoxville',
+    ('04', '46'): 'San Juan',
+    ('05', '01'): 'Chicago',
+    ('05', '16'): 'Columbus',
+    ('05', '28'): 'Detroit',
+    ('05', '36'): 'Indianapolis',
+    ('05', '39'): 'Milwaukee',
+    ('05', '46'): 'Minneapolis-Saint Paul',
+    ('06', '01'): 'Fort Worth',
+    ('06', '02'): 'Albuquerque',
+    ('06', '24'): 'Houston',
+    ('06', '37'): 'Little Rock',
+    ('06', '48'): 'New Orleans',
+    ('06', '56'): 'Oklahoma City',
+    ('06', '59'): 'San Antonio',
+    ('07', '01'): 'Kansas City',
+    ('07', '26'): 'Omaha',
+    ('07', '36'): 'St. Louis',
+    ('08', '01'): 'Denver',
+    ('09', '01'): 'San Francisco',
+    ('09', '08'): 'Honolulu',
+    ('09', '16'): 'Los Angeles',
+    ('10', '01'): 'Seattle',
+    ('10', '06'): 'Anchorage',
+    ('10', '16'): 'Portland'
+}
+
+State_Abbreviations = {
+    'STA': ['AL', 'AK', 'AZ', 'AR', 'CA', 'CO', 'CT', 'DE', 'DC', 'FL', 'GA', 'HI', 'ID', 'IL', 'IN', 'IA', 'KS', 'KY', 'LA', 'ME', 'MD', 'MA', 'MI', 'MN', 'MS', 'MO', 'MT', 'NE', 'NV', 'NH', 'NJ', 'NM', 'NY', 'NC', 'ND', 'OH', 'OK', 'OR', 'PA', 'RI', 'SC', 'SD', 'TN', 'TX', 'UT', 'VT', 'VA', 'WA', 'WV', 'WI', 'WY', 'AS', 'GU', 'MP', 'PR', 'VI'],
+    'FIPS': ['01', '02', '04', '05', '06', '08', '09', '10', '11', '12', '13', '15', '16', '17', '18', '19', '20', '21', '22', '23', '24', '25', '26', '27', '28', '29', '30', '31', '32', '33', '34', '35', '36', '37', '38', '39', '40', '41', '42', '44', '45', '46', '47', '48', '49', '50', '51', '53', '54', '55', '56', '60', '66', '69', '72', '78']
+}
+
+## Data Correct MERGE
+MERGE.loc[MERGE['MCD'] == "00000",'MCD']="99999"
+MERGE.loc[MERGE['PLACE'] == "00000",'PLACE']="99999"
+MERGE.loc[MERGE['PLACE'] == "99990",'PLACE']="99999"
+MERGE['UCKEY']=MERGE['ST']+MERGE['CDBGHPL']
+
+MERGE['UCKEY'] = MERGE["ST"]+MERGE["CDBGHPL"]
+MERGE.loc[MERGE['PLACE'] == MERGE['MCD'],'MCD']="99999"
+###Create Note column
+MERGE['Note'] = MERGE['CDBGTY'].where(MERGE['CDBGTY'].isin(["51", "52"]), np.nan)  # Or a default value
+###Add UC Names to participating records in MERGE
+ucname_mapping = MERGE.loc[MERGE['CDBGTY'] == "61"].set_index(['ST', 'CDBGHPL'])['NAME'].to_dict()
+MERGE.loc[(MERGE['CDBGTY'] == "64") & (MERGE['UC'] == "1"), 'UCName'] = MERGE.loc[(MERGE['CDBGTY'] == "64") & (MERGE['UC'] == "1")].set_index(['ST', 'CDBGHPL']).index.map(ucname_mapping)
+MERGE.loc[(MERGE['CDBGTY'] == "63") & (MERGE['UC'] == "4"), 'UCName'] = MERGE.loc[(MERGE['CDBGTY'] == "63") & (MERGE['UC'] == "4")].set_index(['ST', 'CDBGHPL']).index.map(ucname_mapping)
+
+#Re-assign Fields as needed
+OMBList1 = OMBList1.assign(MA="",STATECOUNTY="")
+OMBList1 = OMBList1.assign(FIPSKEY="", PCFlag="PC")
+Pop = Pop.assign( FIPSKEY="", STATECOUNTY="")
+OMBList1['MA'] = OMBList1['Metropolitan Division Code'].where(OMBList1['Metropolitan Division Code'].notnull(), OMBList1['CBSA Code'])
+
+# Find columns in pop file starting with 'POPESTIMATE'
+pop_estimate_cols = [col for col in Pop.columns if col.startswith('POPESTIMATE')]
+if pop_estimate_cols:
+    # Extract the year from the column names
+    years = [int(col.replace('POPESTIMATE', '')) for col in pop_estimate_cols]
+    # Find the column with the latest year
+    latest_year_col = pop_estimate_cols[years.index(max(years))]
+    # Rename the latest year column to 'POP'
+    Pop = Pop.rename(columns={latest_year_col: 'POP'})
+
+# Update Fipskeys in pop file
+Pop.loc[Pop['SUMLEV'] == '040', ['FIPSKEY']] = Pop["STATE"]
+Pop.loc[Pop['SUMLEV'] == '050', ['FIPSKEY']] = Pop["STATE"]+Pop["COUNTY"]
+Pop.loc[Pop['SUMLEV'] == '061', ['FIPSKEY']] = Pop["STATE"]+Pop["COUNTY"]+Pop["COUSUB"]
+Pop.loc[Pop['SUMLEV'] == '071', ['FIPSKEY']] = Pop["STATE"]+Pop["COUNTY"]+Pop["PLACE"]
+Pop.loc[(Pop['SUMLEV'] == '071')&(Pop['PLACE'] == '99990'), ['FIPSKEY']] = Pop["STATE"]+Pop["COUNTY"]+Pop["COUSUB"]+Pop["PLACE"]
+Pop.loc[Pop['SUMLEV'] == '157', ['FIPSKEY']] = Pop["STATE"]+Pop["COUNTY"]+Pop["PLACE"]
+Pop.loc[Pop['SUMLEV'] == '162', ['FIPSKEY']] = Pop["STATE"]+Pop["PLACE"]
+Pop.loc[Pop['SUMLEV'] == '170', ['FIPSKEY']] = Pop["STATE"]+Pop["CONCIT"]
+Pop['STATECOUNTY'] = Pop["STATE"]+Pop["COUNTY"]
+OMBList1['STATECOUNTY'] = OMBList1["FIPS State Code"]+OMBList1["FIPS County Code"]
+OMBList2['PCFlag']="PC" 
+OMBList2['FIPSKEY'] = OMBList2["FIPS State Code"]+OMBList2["FIPS Place Code"]
+
+### Start Finding Eligible Cities 
+# Primary Geography Flag = 1. Thanks Census for the easy to use flag. Make sure it has some population
+Eligible_cities = Pop[Pop['PRIMGEO_FLAG'] == "1"]
+Eligible_cities = Eligible_cities[Eligible_cities['POP']!= 0]
+
+#Remove micropolitan areas from list 1 and list 2
+OMBList1 = OMBList1[OMBList1['Metropolitan/Micropolitan Statistical Area']!= 'Micropolitan Statistical Area']
+OMBList2 = OMBList2[OMBList2['Metropolitan/Micropolitan Statistical Area']!= 'Micropolitan Statistical Area']
+
+#Fipskey Data
+Eligible_cities.loc[Eligible_cities['SUMLEV'] == "157", 'FIPSKEY'] = Eligible_cities.loc[Eligible_cities['SUMLEV'] == "157", 'STATE'] + Eligible_cities.loc[Eligible_cities['SUMLEV'] == "157", 'PLACE']
+Eligible_cities.loc[Eligible_cities['SUMLEV'] == "071", 'FIPSKEY'] = Eligible_cities.loc[Eligible_cities['SUMLEV'] == "071", 'STATE'] + Eligible_cities.loc[Eligible_cities['SUMLEV'] == "071", 'PLACE']
+Eligible_cities.loc[Eligible_cities['SUMLEV'] == "061", 'FIPSKEY'] = Eligible_cities.loc[Eligible_cities['SUMLEV'] == "061", 'STATE'] + Eligible_cities.loc[Eligible_cities['SUMLEV'] == "061", 'COUNTY'] + Eligible_cities.loc[Eligible_cities['SUMLEV'] == "061", 'COUSUB']
+Eligible_cities.loc[(Eligible_cities['SUMLEV'] == '071') & (Eligible_cities['NAME'].str.startswith('Balance of')), 'FIPSKEY'] = Eligible_cities['STATE'].astype(str) + Eligible_cities['COUNTY'].astype(str) + Eligible_cities['COUSUB'].astype(str) + Eligible_cities['PLACE'].astype(str)
+
+#Add MCD village records in NY only.
+# 1. Select the records from Pop to append
+pop_records_to_append = Pop[(Pop['STATE'].isin(Eligible_cities.loc[(Eligible_cities['FUNCSTAT'] == 'S') & (Eligible_cities['STATE'] == '36'), 'STATE'])) & (Pop['COUSUB'].isin(Eligible_cities.loc[(Eligible_cities['SUMLEV'] == '071') & (Eligible_cities['PLACE'] == '99990'), 'COUSUB']))].copy()  # Create a copy!
+# 2. Generate FIPSKEY for the records to append
+pop_records_to_append['FIPSKEY'] = pop_records_to_append['STATE'].astype(str) + pop_records_to_append['COUNTY'].astype(str) + pop_records_to_append['COUSUB'].astype(str)
+# 3. Concatenate the DataFrames
+Eligible_cities = pd.concat([Eligible_cities, pop_records_to_append], ignore_index=True, axis=0)
+
+# Match to OMB County list and designate MSA area. 
+OMBList1.loc[OMBList1['Metropolitan Division Title'].notnull(), 'CBSA Title'] = OMBList1.loc[OMBList1['Metropolitan Division Title'].notnull(), 'Metropolitan Division Title']
+Eligible_cities = pd.merge(Eligible_cities, OMBList1[OMBList1['Metropolitan/Micropolitan Statistical Area'] == 'Metropolitan Statistical Area'][['STATECOUNTY', 'MA', 'CBSA Title']], on='STATECOUNTY', how='left')
+
+### Mark Principal Cities
+OMBList2 = OMBList2.copy() #created this DF to avoid pandas warning
+OMBList2.loc[:, 'STATE'] = OMBList2['FIPS State Code']  #use .loc to avoid pandas warning
+OMBList2.loc[:, 'PLACE'] = OMBList2['FIPS Place Code']   #use .loc to avoid pandas warning
+#Match on Place Code
+Eligible_cities = pd.merge(Eligible_cities, OMBList2[['STATE', 'PLACE', 'PCFlag']], on=['STATE', 'PLACE'], how='left')
+#Match on County Subdivision Code
+OMBList2.loc[:, 'COUSUB'] = OMBList2['FIPS Place Code']     #use .loc to avoid pandas warning
+Eligible_cities = pd.merge(Eligible_cities, OMBList2[['STATE', 'COUSUB', 'PCFlag']], on=['STATE', 'COUSUB'], how='left', suffixes=('', '_COUSUB'))
+# Combine PCFlag columns, prioritizing the PLACE match
+Eligible_cities['PCFlag'] = Eligible_cities['PCFlag'].fillna(Eligible_cities['PCFlag_COUSUB'])
+# Drop the extra column
+Eligible_cities.drop(columns=['PCFlag_COUSUB'], inplace=True)
+Eligible_cities.drop(columns=['PCFlag_x', 'PCFlag_y'], errors='ignore', inplace=True)
+
+### Add County Names
+Eligible_cities = pd.merge(Eligible_cities, Pop.loc[Pop['SUMLEV'] == "050", ['STATE', 'COUNTY', "NAME"]].rename(columns={"NAME":"County Name"}), how='left', on=['STATE', 'COUNTY'])
+
+### Add Total Population
+Eligible_cities = pd.merge(Eligible_cities, Pop.loc[(Pop['SUMLEV'] == "162") | (Pop['SUMLEV'] == "061"), [ 'FIPSKEY', 'POP']].rename(columns={"POP": "PopTotal"}), how='left', on=['FIPSKEY'])
+#Eligible_cities = pd.merge(Eligible_cities, Pop.loc[Pop['SUMLEV'] == "162", ['STATE', 'PLACE', 'POP']].rename(columns={"POP":"PopTotal"}), how='left', on=['STATE', 'PLACE'])
+Eligible_cities.loc[Eligible_cities['PopTotal'].isnull(), 'PopTotal'] = Eligible_cities['POP']
+
+##### Mark Places Currently Entitled
+## Mark 51s
+Eligible_cities = pd.merge(Eligible_cities, MERGE.loc[MERGE['CDBGTY'] == "51", ['ST', 'PLACE', 'Note']].rename(columns={"ST":"STATE"}), how='left', on=['STATE', 'PLACE'])
+## Mark 52s
+Eligible_cities = pd.merge(Eligible_cities, MERGE.loc[MERGE['CDBGTY'] == "52", ['ST', 'PLACE', 'Note']].rename(columns={"ST":"STATE"}), how='left', on=['STATE', 'PLACE'], suffixes=('', '_52'))
+Eligible_cities['Note'] = Eligible_cities['Note'].fillna(Eligible_cities['Note_52'])
+Eligible_cities = Eligible_cities.drop(columns=['Note_52'])
+##Mark 51s by ST+CO+MCD
+Eligible_cities = pd.merge(Eligible_cities, MERGE.loc[MERGE['CDBGTY'] == "51", ['ST', 'CO', 'MCD', 'Note']].rename(columns={'ST':"STATE", "CO":"COUNTY", "MCD":"COUSUB"}), how='left', on=['STATE', 'COUNTY', 'COUSUB',], suffixes=('', '_TEMP'))
+Eligible_cities['Note'] = Eligible_cities['Note'].fillna(Eligible_cities['Note_TEMP'])
+Eligible_cities = Eligible_cities.drop(columns=['Note_TEMP'])
+##Mark 52s by ST+CO+MCD
+Eligible_cities = pd.merge(Eligible_cities, MERGE.loc[MERGE['CDBGTY'] == "52", ['ST', 'CO', 'MCD', 'Note']].rename(columns={'ST':"STATE", "CO":"COUNTY", "MCD":"COUSUB"}), how='left', on=['STATE', 'COUNTY', 'COUSUB',], suffixes=('', '_TEMP'))
+Eligible_cities['Note'] = Eligible_cities['Note'].fillna(Eligible_cities['Note_TEMP'])
+Eligible_cities = Eligible_cities.drop(columns=['Note_TEMP'])
+
+##### Mark Places Participating in another UC
+## Mark 64s using STATE+PLACE
+Eligible_cities = pd.merge(Eligible_cities, MERGE.loc[(MERGE['CDBGTY'] == "64") & (MERGE['UCName'].notnull()), ['ST', 'PLACE', 'UCName', 'CYCLE']].rename(columns={"ST":"STATE"}), how='left', on=['STATE', 'PLACE'])
+## Mark 64s using FIPSKEY
+Eligible_cities = pd.merge(Eligible_cities, MERGE.loc[(MERGE['CDBGTY'] == "64") & (MERGE['UCName'].notnull()), ['FIPSKEY', 'UCName', 'CYCLE']], how='left', on=['FIPSKEY'], suffixes=('', '_64'))  # Correct           
+Eligible_cities['UCName'] = Eligible_cities['UCName'].fillna(Eligible_cities['UCName_64'])
+Eligible_cities['CYCLE'] = Eligible_cities['CYCLE'].fillna(Eligible_cities['CYCLE_64'])
+Eligible_cities = Eligible_cities.drop(columns=['UCName_64'])
+Eligible_cities = Eligible_cities.drop(columns=['CYCLE_64'])
+
+## Mark 63s using STATE+PLACE
+Eligible_cities = pd.merge(Eligible_cities, 
+                         MERGE.loc[(MERGE['CDBGTY'] == "63") & (MERGE['UCName'].notnull()), ['ST', 'PLACE', 'UCName', 'CYCLE']].rename(columns={"ST": "STATE"}),
+                         how='left', on=['STATE', 'PLACE'], suffixes=('', '_63'))
+Eligible_cities['UCName'] = Eligible_cities['UCName'].fillna(Eligible_cities['UCName_63'])
+Eligible_cities['CYCLE'] = Eligible_cities['CYCLE'].fillna(Eligible_cities['CYCLE_63'])
+Eligible_cities = Eligible_cities.drop(columns=['UCName_63', 'CYCLE_63']) # Combined drop
+## Mark 63s using FIPSKEY
+Eligible_cities = pd.merge(Eligible_cities, MERGE.loc[(MERGE['CDBGTY'] == "63") & (MERGE['UCName'].notnull()), ['FIPSKEY', 'UCName', 'CYCLE']], how='left', on=['FIPSKEY'], suffixes=('', '_63'))  # Correct           
+Eligible_cities['UCName'] = Eligible_cities['UCName'].fillna(Eligible_cities['UCName_63'])
+Eligible_cities['CYCLE'] = Eligible_cities['CYCLE'].fillna(Eligible_cities['CYCLE_63'])
+Eligible_cities = Eligible_cities.drop(columns=['UCName_63'])
+Eligible_cities = Eligible_cities.drop(columns=['CYCLE_63'])
+
+####Add FO Data
+CPDxFOxCounty['STATECOUNTY'] = CPDxFOxCounty['FIPSKEY'].astype(str).str.zfill(5)
+CPDxFOxCounty['RGN'] = CPDxFOxCounty['RGN'].astype(str).str.zfill(2)
+CPDxFOxCounty['FO'] = CPDxFOxCounty['FO'].astype(str).str.zfill(2)
+Eligible_cities = pd.merge(Eligible_cities, CPDxFOxCounty[['STATECOUNTY', 'RGN', 'FO', 'ROFO']], on='STATECOUNTY', how='left') 
+Eligible_cities['FOName'] = Eligible_cities.apply(lambda row: Field_Office_Codes_.get((row['RGN'], row['FO'])), axis=1)
+
+##################################################################3###
+###########################Record Drop Commands######################
+######################################################################
+
+###Drop Recrods not at least Partially within a Metro Area
+#fips_not_in_metro = Eligible_cities.groupby('FIPSKEY')['MA'].apply(lambda x: x.isnull().all()).loc[lambda x: x].index.tolist()
+#Eligible_cities = Eligible_cities[~Eligible_cities['FIPSKEY'].isin(fips_not_in_metro)]
+###Drop County Balance Records
+Eligible_cities = Eligible_cities.drop(Eligible_cities[(Eligible_cities['SUMLEV'] == "157") & (Eligible_cities['PLACE'] == "99990")].index)
+###Drop Identified Metro Cities
+Eligible_cities = Eligible_cities[Eligible_cities['Note'].isnull()]
+###Drop all records where pop<50k unless it's a principal city
+#Eligible_cities = Eligible_cities.drop(Eligible_cities[(Eligible_cities['PopTotal'] < 50000) & (Eligible_cities['PCFlag'].isnull())].index)
+####Drop all records in the cities to skip list
+Eligible_cities = Eligible_cities[~Eligible_cities['FIPSKEY'].isin(CitiesToSkip)]
+####Remove Cycle codes for places not in urban counties
+Eligible_cities.loc[Eligible_cities['UCName'].isnull(), 'CYCLE'] = None
+### Drop County Balance Records
+#Eligible_cities = Eligible_cities[Eligible_cities['PLACE']!= "99990"]
+#Drop County 050 Records
+Eligible_cities = Eligible_cities[Eligible_cities['SUMLEV']!= "050"]
+#Drop Ohio townships
+Eligible_cities = Eligible_cities[~((Eligible_cities['SUMLEV'] == "071") & (Eligible_cities['STATE'] == "39") & (Eligible_cities['PLACE'] == "99990"))]
+Eligible_cities = Eligible_cities[~((Eligible_cities['SUMLEV'] == "061") & (Eligible_cities['STATE'] == "39"))]
+##Remove "PT" text from name field
+Eligible_cities['NAME'] = Eligible_cities['NAME'].str.replace(' (pt.)', '', regex=False)
+#Drop extra stuff i dont like
+Eligible_cities = Eligible_cities.drop(columns=['Note'])
+Eligible_cities = Eligible_cities.drop(columns=['CONCIT'])
+Eligible_cities = Eligible_cities.drop(columns=['PRIMGEO_FLAG'])
+Eligible_cities = Eligible_cities.drop(columns=['STATECOUNTY'])
+
+###NEW: Drop records that match MERGE on FIPS ST+CO+FIPS for TY 51 and 52 records
+Eligible_cities = Eligible_cities[~Eligible_cities['FIPSKEY'].isin(MERGE[(MERGE['CDBGTY'].isin(['51', '52'])) & (MERGE['CDBGFLAG'] == 'C')]['FIPSKEY'])]
+MERGE.loc[MERGE['CDBGTY'].isin(['51', '52']), 'FIPSKEY'] = MERGE.loc[MERGE['CDBGTY'].isin(['51', '52']), 'ST'].astype(str) + MERGE.loc[MERGE['CDBGTY'].isin(['51', '52']), 'CO'].astype(str) + MERGE.loc[MERGE['CDBGTY'].isin(['51', '52']), 'PLACE'].astype(str)
+Eligible_cities = Eligible_cities[~Eligible_cities['FIPSKEY'].isin(MERGE[(MERGE['CDBGTY'].isin(['51', '52'])) & (MERGE['CDBGFLAG'] == 'C')]['FIPSKEY'])]
+
+#Drop Extra township balance records
+Eligible_cities = Eligible_cities.drop(Eligible_cities[(Eligible_cities['FUNCSTAT'] == 'S') & (Eligible_cities['FIPSKEY'].str.len() == 15)].index)
+
+### Drop Duplicate rows
+Eligible_cities = Eligible_cities.drop_duplicates()
+
+####Sort
+Eligible_cities = Eligible_cities.sort_values(by=['ROFO','FIPSKEY', 'PLACE', 'County Name', 'UCName'], ascending=[True, True, True, True, True])
+
+###Add state abbreviations
+Eligible_cities['STA'] = Eligible_cities['FIPSKEY'].astype(str).str[:2].map(dict(zip(State_Abbreviations['FIPS'], State_Abbreviations['STA'])))
+
+###Clean up and reorder columns.
+#Make it look exactly like the last time
+Eligible_cities = Eligible_cities[["NAME","STA","POP", "PopTotal", "PCFlag","County Name", "CBSA Title" ,"STNAME","FOName",  "UCName", "CYCLE","FIPSKEY", "SUMLEV",  "STATE", "COUNTY", "COUSUB", "PLACE","MA","ROFO",]]
+
+#Rename Pop Columns back to original titles
+Eligible_cities = Eligible_cities.rename(columns={'POP': latest_year_col}) # Where latest_year_col is the original name
+Eligible_cities = Eligible_cities.rename(columns={'PopTotal': latest_year_col + '-Total'})
+
+
+#####Create PREMERGE Cities Tab
+PREMERGECITIES= Eligible_cities.copy()
+
+###Add Columns
+PREMERGECITIES.loc[:, 'CDBGTY'] = '  '
+PREMERGECITIES.loc[:, 'HOMETY'] = '  '
+PREMERGECITIES.loc[PREMERGECITIES['PCFlag'] == 'PC', 'CDBGTY'] = '51'
+PREMERGECITIES.loc[PREMERGECITIES['PCFlag'] == 'PC', 'HOMETY'] = '51'
+PREMERGECITIES.loc[PREMERGECITIES['CDBGTY']=="  ", 'CDBGTY'] = '52'
+PREMERGECITIES.loc[PREMERGECITIES['HOMETY']=="  ", 'HOMETY'] = '52'
+PREMERGECITIES.loc[:, 'UC'] = '0'
+PREMERGECITIES.loc[:, 'UCb4'] = '0'
+PREMERGECITIES.loc[:, 'CDBGFLAG'] = 'C'
+PREMERGECITIES.loc[:, 'HOMEFLAG'] = 'H'
+PREMERGECITIES.loc[:, 'CDBGHPL'] = '0000'
+PREMERGECITIES.loc[:, 'HOMEHPL'] = '0000'
+PREMERGECITIES.loc[:, 'HPL2'] = '0000'
+PREMERGECITIES.loc[:, 'CNSRT'] = 'C000'
+PREMERGECITIES.loc[:, 'HPLC'] = ''
+PREMERGECITIES.loc[:, 'CNSRTCYCLE'] = ''
+PREMERGECITIES.loc[:, 'YRPRIOR'] = '0'
+PREMERGECITIES.loc[:, 'AS'] = '0'
+PREMERGECITIES.loc[:, 'JOINT'] = ' '
+PREMERGECITIES.loc[:,'NOTE'] = '  '
+
+###Drop Columns
+PREMERGECITIES = PREMERGECITIES[~((PREMERGECITIES['FIPSKEY'].str.len() == 10) & (PREMERGECITIES['SUMLEV'] == '071'))]
+PREMERGECITIES = PREMERGECITIES.drop('PCFlag', axis=1)
+PREMERGECITIES = PREMERGECITIES.drop('County Name', axis=1)
+PREMERGECITIES = PREMERGECITIES.drop('FOName', axis=1)
+PREMERGECITIES = PREMERGECITIES.drop('UCName', axis=1)
+PREMERGECITIES = PREMERGECITIES.drop('CBSA Title', axis=1)
+PREMERGECITIES['CYCLE'] = None
+PREMERGECITIES = PREMERGECITIES.dropna(subset=['MA'])
+
+###Update Summary Level
+PREMERGECITIES.loc[PREMERGECITIES['SUMLEV'] == '071', 'SUMLEV'] = '162'
+PREMERGECITIES.loc[PREMERGECITIES['SUMLEV'] == '157', 'SUMLEV'] = '162'
+PREMERGECITIES.loc[PREMERGECITIES['SUMLEV'] == '162', 'COUSUB'] = '99999'
+PREMERGECITIES.loc[PREMERGECITIES['SUMLEV'] == '162', 'COUNTY'] = '000'
+PREMERGECITIES.loc[PREMERGECITIES['SUMLEV'] == '162', 'MCDFLAG'] = 'N'
+PREMERGECITIES.loc[PREMERGECITIES['SUMLEV'] == '061', 'MCDFLAG'] = 'T'
+#Rename columns
+PREMERGECITIES.rename(columns={"COUSUB": "MCD"}, inplace=True)
+PREMERGECITIES.rename(columns={"COUNTY": "CO"}, inplace=True)
+PREMERGECITIES.rename(columns={"STNAME": "STATEBREAK"}, inplace=True)
+PREMERGECITIES.rename(columns={"STATE": "ST"}, inplace=True)
+##Add columns
+PREMERGECITIES['MNI'] = '0000'
+PREMERGECITIES['AS'] = '1'
+PREMERGECITIES['AGL'] = '0'
+PREMERGECITIES['ZIP3'] = '   '
+PREMERGECITIES['RGN'] = PREMERGECITIES['ROFO'].str[:2]
+PREMERGECITIES['FO'] = PREMERGECITIES['ROFO'].str[-2:]
+PREMERGECITIES.loc[PREMERGECITIES['PLACE'] == '00000', 'PLACE'] = '99999'
+
+#Update HPL Codes
+HLC_LIST['FIPSKEY'] = HLC_LIST['FSC'] + HLC_LIST['FPC']
+fips_to_hpl2 = HLC_LIST.set_index('FIPSKEY')['HLC'].to_dict()
+PREMERGECITIES['HPL2'] = PREMERGECITIES['FIPSKEY'].map(fips_to_hpl2)
+PREMERGECITIES['STMCD'] = PREMERGECITIES['ST']+  PREMERGECITIES['MCD']
+PREMERGECITIES['HPL22'] = PREMERGECITIES['STMCD'].map(fips_to_hpl2)
+PREMERGECITIES.loc[PREMERGECITIES['HPL2'].isnull(), 'HPL2'] = PREMERGECITIES.loc[PREMERGECITIES['HPL2'].isnull(), 'HPL22']
+PREMERGECITIES = PREMERGECITIES.drop('STMCD', axis=1)
+PREMERGECITIES = PREMERGECITIES.drop('HPL22', axis=1)
+PREMERGECITIES['CDBGHPL'] = PREMERGECITIES['HPL2']
+PREMERGECITIES['HOMEHPL'] = PREMERGECITIES['HPL2']
+PREMERGECITIES['HPL2'] = '0000'
+#Add MCD Flag
+PREMERGECITIES['MCDFLAG'] = 'N'
+PREMERGECITIES.loc[PREMERGECITIES['SUMLEV'] == '061', 'MCDFLAG'] = 'T'
+# Drop ROFO
+PREMERGECITIES = PREMERGECITIES.drop('ROFO', axis=1)
+#Drop duplicates
+PREMERGECITIES = PREMERGECITIES.drop_duplicates()
+
+####Assign to MSA with largest population part:
+# Find the row with the maximum POPESTIMATE2023 for each FIPSKEY
+PREMERGECITIES = PREMERGECITIES.loc[PREMERGECITIES.groupby('FIPSKEY')['POPESTIMATE2023'].idxmax()]
+#If you want to reset the index after filtering
+PREMERGECITIES = PREMERGECITIES.reset_index(drop=True)
+
+
+#Drop Population Part and rename total
+PREMERGECITIES = PREMERGECITIES.drop(latest_year_col, axis=1)  
+PREMERGECITIES = PREMERGECITIES.rename(columns={latest_year_col + '-Total':latest_year_col})
+
+PREMERGECITIES = PREMERGECITIES.sort_values(by=['RGN','FO', 'FIPSKEY'], ascending=[True, True, True])
+
+############## Done Cities!
+############## Done Cities!
+############## Done Cities!
+############## Done Cities!
+############## Done Cities!
+############## Done Cities!
+
+### Start Making EligibleCounties 
+# Primary Geography Flag = 1. Thanks Census for the easy to use flag. Make sure it has some population
+MERGEc = MERGE[MERGE['CDBGFLAG'] == "C"].copy()
+
+EligibleCounties = Pop[Pop['PRIMGEO_FLAG'] == "1"]
+EligibleCounties = EligibleCounties[EligibleCounties['POP']!= 0]
+#Fipskey Data
+EligibleCounties.loc[EligibleCounties['SUMLEV'] == "157", 'FIPSKEY'] = EligibleCounties.loc[EligibleCounties['SUMLEV'] == "157", 'STATE'] + EligibleCounties.loc[EligibleCounties['SUMLEV'] == "157", 'PLACE']
+EligibleCounties.loc[EligibleCounties['SUMLEV'] == "071", 'FIPSKEY'] = EligibleCounties.loc[EligibleCounties['SUMLEV'] == "071", 'STATE'] + EligibleCounties.loc[EligibleCounties['SUMLEV'] == "071", 'PLACE']
+EligibleCounties.loc[EligibleCounties['SUMLEV'] == "061", 'FIPSKEY'] = EligibleCounties.loc[EligibleCounties['SUMLEV'] == "061", 'STATE'] + EligibleCounties.loc[EligibleCounties['SUMLEV'] == "061", 'COUNTY'] + EligibleCounties.loc[EligibleCounties['SUMLEV'] == "061", 'COUSUB']
+EligibleCounties.loc[(EligibleCounties['SUMLEV'] == '071') & (EligibleCounties['NAME'].str.startswith('Balance of')), 'FIPSKEY'] = EligibleCounties['STATE'].astype(str) + EligibleCounties['COUNTY'].astype(str) + EligibleCounties['COUSUB'].astype(str) + EligibleCounties['PLACE'].astype(str)
+# Match to OMB County list and designate MSA area. 
+OMBList1.loc[OMBList1['Metropolitan Division Title'].notnull(), 'CBSA Title'] = OMBList1.loc[OMBList1['Metropolitan Division Title'].notnull(), 'Metropolitan Division Title']
+EligibleCounties = pd.merge(EligibleCounties, OMBList1[OMBList1['Metropolitan/Micropolitan Statistical Area'] == 'Metropolitan Statistical Area'][['STATECOUNTY', 'MA', 'CBSA Title']], on='STATECOUNTY', how='left')
+### Add County Names
+EligibleCounties = pd.merge(EligibleCounties, Pop.loc[Pop['SUMLEV'] == "050", ['STATE', 'COUNTY', "NAME"]].rename(columns={"NAME":"County Name"}), how='left', on=['STATE', 'COUNTY'])
+##### Mark Places Currently Entitled
+## Mark 51s
+EligibleCounties = pd.merge(EligibleCounties, MERGEc.loc[MERGEc['CDBGTY'] == "51", ['ST', 'PLACE', 'Note']].rename(columns={"ST":"STATE"}), how='left', on=['STATE', 'PLACE'])
+## Mark 52s
+EligibleCounties = pd.merge(EligibleCounties, MERGEc.loc[MERGEc['CDBGTY'] == "52", ['ST', 'PLACE', 'Note']].rename(columns={"ST":"STATE"}), how='left', on=['STATE', 'PLACE'], suffixes=('', '_52'))
+EligibleCounties['Note'] = EligibleCounties['Note'].fillna(EligibleCounties['Note_52'])
+EligibleCounties = EligibleCounties.drop(columns=['Note_52'])
+##Mark 51s by ST+CO+MCD
+EligibleCounties = pd.merge(EligibleCounties, MERGEc.loc[MERGEc['CDBGTY'] == "51", ['ST', 'CO', 'MCD', 'Note']].rename(columns={'ST':"STATE", "CO":"COUNTY", "MCD":"COUSUB"}), how='left', on=['STATE', 'COUNTY', 'COUSUB',], suffixes=('', '_TEMP'))
+EligibleCounties['Note'] = EligibleCounties['Note'].fillna(EligibleCounties['Note_TEMP'])
+EligibleCounties = EligibleCounties.drop(columns=['Note_TEMP'])
+##Mark 52s by ST+CO+MCD
+EligibleCounties = pd.merge(EligibleCounties, MERGEc.loc[MERGEc['CDBGTY'] == "52", ['ST', 'CO', 'MCD', 'Note']].rename(columns={'ST':"STATE", "CO":"COUNTY", "MCD":"COUSUB"}), how='left', on=['STATE', 'COUNTY', 'COUSUB',], suffixes=('', '_TEMP'))
+EligibleCounties['Note'] = EligibleCounties['Note'].fillna(EligibleCounties['Note_TEMP'])
+EligibleCounties = EligibleCounties.drop(columns=['Note_TEMP'])
+#Make all mark codes X
+EligibleCounties['Note'] = EligibleCounties['Note'].apply(lambda x: 'X' if pd.notna(x) else x)
+#Remove Counties not in MSA
+#EligibleCounties.dropna(subset=['MA'], inplace=True)
+##Add County Pop Total
+EligibleCounties = EligibleCounties.merge(Pop[Pop['SUMLEV'] == '050'][['STATECOUNTY', 'POP']].rename(columns={'POP': 'PopTotal'}), on='STATECOUNTY', how='left')
+### Drop Duplicate rows
+EligibleCounties = EligibleCounties.drop_duplicates()
+
+####Mark all records in the cities to skip list
+EligibleCounties.loc[EligibleCounties['FIPSKEY'].isin(CitiesToSkip), 'Note'] = 'X'
+
+##Calculate county populations less metro cities within
+# Step 1: Calculate the sums for records where Note is NaN
+pop_sums = EligibleCounties[EligibleCounties['Note'].isnull()].groupby('STATECOUNTY')['POP'].sum().reset_index()
+# Step 1: Re-name the column
+pop_sums = pop_sums.rename(columns={'POP': 'EligiblePop'})
+# Step 3: Merge the sums back into the original DataFrame
+EligibleCounties = EligibleCounties.merge(pop_sums, on='STATECOUNTY', how='left')
+#####Drop currently entitled Counties
+# 1. Extract the STATECOUNTY values to be dropped
+# Filter MERGE for CDBGTY = "61" and get the corresponding FIPSKEY values
+fips_to_drop = MERGE.loc[MERGE['CDBGTY'] == "61", 'FIPSKEY'].values
+# 2. Drop the matching records from AttachmentsF
+# Use `isin()` to create a boolean mask for rows where STATECOUNTY is in fips_to_drop
+mask = EligibleCounties['STATECOUNTY'].isin(fips_to_drop)
+# Invert the mask to select rows that are NOT in fips_to_drop
+#EligibleCounties = EligibleCounties[~mask]
+### Add state abbreviations
+EligibleCounties['STA'] = EligibleCounties['STATE'].astype(str).str[:2].map(dict(zip(State_Abbreviations['FIPS'], State_Abbreviations['STA'])))
+# Drop records where STA is in the specified list
+EligibleCounties = EligibleCounties[~EligibleCounties['STA'].isin(["CT", "HI", "MA", "RI", "DC"])]
+# Drop records with less than 200k Eligible pop.
+#EligibleCounties = EligibleCounties[EligibleCounties['EligiblePop'] >= 200000]
+
+####Add FO Data
+EligibleCounties = pd.merge(EligibleCounties, CPDxFOxCounty[['STATECOUNTY', 'RGN', 'FO', 'ROFO']], on='STATECOUNTY', how='left') 
+EligibleCounties['FOName'] = EligibleCounties.apply(lambda row: Field_Office_Codes_.get((row['RGN'], row['FO'])), axis=1)
+
+####Sort
+EligibleCounties = EligibleCounties.sort_values(by=['ROFO','STATECOUNTY', 'FIPSKEY'], ascending=[True, True, True])
+
+##Make County Summary List
+CountySummary = EligibleCounties[['County Name', 'STA', 'PopTotal', 'EligiblePop', 'CBSA Title', 'STNAME', "FOName"]].copy()
+### Drop Duplicate rows
+CountySummary = CountySummary.drop_duplicates()
+
+#Rename Pop Columns back to original titles
+EligibleCounties = EligibleCounties.rename(columns={'POP': latest_year_col}) # Where latest_year_col is the original name
+EligibleCounties = EligibleCounties.rename(columns={'PopTotal': latest_year_col + '-Total'})
+CountySummary = CountySummary.rename(columns={'PopTotal': latest_year_col + '-Total'})
+
+### Drop STATECOUNTY
+EligibleCounties = EligibleCounties.drop('STATECOUNTY', axis=1)
+
+
+### Make PreMERGE Counties File. These are the records that would go into the 61 series of a new Urban County set of records.
+PREMERGECOUNTIES= EligibleCounties.copy()
+
+###update Pop Fileds
+PREMERGECOUNTIES = PREMERGECOUNTIES.drop('EligiblePop', axis=1)
+PREMERGECOUNTIES = PREMERGECOUNTIES.rename(columns={latest_year_col + '-Total': 'TY61POP'})
+
+###Add Columns
+PREMERGECOUNTIES.loc[:, 'CDBGTY'] = ""
+PREMERGECOUNTIES.loc[:, 'HOMETY'] = ""
+PREMERGECOUNTIES.loc[:, 'UC'] = '0'
+PREMERGECOUNTIES.loc[:, 'UCb4'] = '0'
+PREMERGECOUNTIES.loc[:, 'CDBGFLAG'] = 'C'
+PREMERGECOUNTIES.loc[:, 'HOMEFLAG'] = 'H'
+PREMERGECOUNTIES.loc[:, 'CDBGHPL'] = '0000'
+PREMERGECOUNTIES.loc[:, 'HOMEHPL'] = '0000'
+PREMERGECOUNTIES.loc[:, 'HPL2'] = '0000'
+PREMERGECOUNTIES.loc[:, 'CNSRT'] = 'C000'
+PREMERGECOUNTIES.loc[:, 'HPLC'] = ''
+PREMERGECOUNTIES.loc[:, 'CNSRTCYCLE'] = ''
+PREMERGECOUNTIES.loc[:, 'YRPRIOR'] = '0'
+PREMERGECOUNTIES.loc[:, 'AS'] = '0'
+PREMERGECOUNTIES.loc[:, 'JOINT'] = ''
+
+#Start Updating to Match MERGE Format
+PREMERGECOUNTIES.loc[PREMERGECOUNTIES['Note'] == 'X', 'CDBGTY'] = '62'
+PREMERGECOUNTIES.loc[PREMERGECOUNTIES['CDBGTY'] == "", 'CDBGTY'] = '64'
+PREMERGECOUNTIES['CDBGHPL'] = "9" + PREMERGECOUNTIES['COUNTY'].astype(str)
+
+PREMERGECOUNTIES.loc[PREMERGECOUNTIES['Note'] == 'X', 'HOMETY'] = '62'
+PREMERGECOUNTIES.loc[PREMERGECOUNTIES['HOMETY'] == "", 'HOMETY'] = '64'
+PREMERGECOUNTIES['HOMEHPL'] = "9" + PREMERGECOUNTIES['COUNTY'].astype(str)
+
+#Update HPL Codes
+HLC_LIST['FIPSKEY'] = HLC_LIST['FSC'] + HLC_LIST['FPC']
+fips_to_hpl2 = HLC_LIST.set_index('FIPSKEY')['HLC'].to_dict()
+PREMERGECOUNTIES['HPL2'] = PREMERGECOUNTIES['FIPSKEY'].map(fips_to_hpl2)
+PREMERGECOUNTIES['STMCD'] = PREMERGECOUNTIES['STATE']+  PREMERGECOUNTIES['COUSUB']
+PREMERGECOUNTIES['HPL22'] = PREMERGECOUNTIES['STMCD'].map(fips_to_hpl2)
+PREMERGECOUNTIES.loc[PREMERGECOUNTIES['HPL2'].isnull(), 'HPL2'] = PREMERGECOUNTIES.loc[PREMERGECOUNTIES['HPL2'].isnull(), 'HPL22']
+PREMERGECOUNTIES = PREMERGECOUNTIES.drop('STMCD', axis=1)
+PREMERGECOUNTIES = PREMERGECOUNTIES.drop('HPL22', axis=1)
+
+#Drop 061 records not in a MCD State
+PREMERGECOUNTIES = PREMERGECOUNTIES[~((PREMERGECOUNTIES['SUMLEV'] == "061") & (~PREMERGECOUNTIES['STA'].isin(MCD_States)))]
+PREMERGECOUNTIES = PREMERGECOUNTIES[~((PREMERGECOUNTIES['PLACE'] == "99990") & (~PREMERGECOUNTIES['STA'].isin(MCD_States)))]
+
+#Add MCD Flag
+PREMERGECOUNTIES['MCDFLAG'] = 'N'
+PREMERGECOUNTIES.loc[PREMERGECOUNTIES['SUMLEV'] == '061', 'MCDFLAG'] = 'T'
+PREMERGECOUNTIES.loc[PREMERGECOUNTIES['PLACE'] == '99990', 'MCDFLAG'] = 'B'
+
+###Update Fipskeys
+PREMERGECOUNTIES['FIPSKEY'] = PREMERGECOUNTIES['STATE'].astype(str) + PREMERGECOUNTIES['COUNTY'].astype(str) + PREMERGECOUNTIES['PLACE'].astype(str)
+
+PREMERGECOUNTIES.loc[PREMERGECOUNTIES['SUMLEV'] == '061', 'FIPSKEY'] = (
+    PREMERGECOUNTIES.loc[PREMERGECOUNTIES['SUMLEV'] == '061', 'STATE'].astype(str) +
+    PREMERGECOUNTIES.loc[PREMERGECOUNTIES['SUMLEV'] == '061', 'COUNTY'].astype(str) +
+    PREMERGECOUNTIES.loc[PREMERGECOUNTIES['SUMLEV'] == '061', 'COUSUB'].astype(str)
+)
+
+## Update UC inclusion code
+PREMERGECOUNTIES.loc[PREMERGECOUNTIES['CDBGTY'] == '62', 'UC'] = '3'
+PREMERGECOUNTIES.loc[PREMERGECOUNTIES['CDBGTY'] == '64', 'UC'] = '3'
+PREMERGECOUNTIES['UCb4']= '0' 
+
+###Update Summary Level
+PREMERGECOUNTIES.loc[PREMERGECOUNTIES['SUMLEV'] == '071', 'SUMLEV'] = '157'
+PREMERGECOUNTIES.loc[PREMERGECOUNTIES['MCDFLAG'] == 'B', 'SUMLEV'] = '071'
+
+
+#Rename columns
+PREMERGECOUNTIES.rename(columns={"COUSUB": "MCD"}, inplace=True)
+PREMERGECOUNTIES.rename(columns={"COUNTY": "CO"}, inplace=True)
+PREMERGECOUNTIES.rename(columns={"STNAME": "STATEBREAK"}, inplace=True)
+PREMERGECOUNTIES.rename(columns={"STATE": "ST"}, inplace=True)
+##Add columns
+PREMERGECOUNTIES['MNI'] = '0000'
+PREMERGECOUNTIES['AGL'] = '0'
+PREMERGECOUNTIES['ZIP3'] = '   '
+PREMERGECOUNTIES['RGN'] = PREMERGECOUNTIES['ROFO'].str[:2]
+PREMERGECOUNTIES['FO'] = PREMERGECOUNTIES['ROFO'].str[-2:]
+PREMERGECOUNTIES.loc[PREMERGECOUNTIES['PLACE'] == '00000', 'PLACE'] = '99999'
+#PREMERGECOUNTIES = PREMERGECOUNTIES.rename(columns={latest_year_col + '-Total':latest_year_col})
+
+###Add 61 Records
+desired_columns = [
+    'ST', 'CO', 'PRIMGEO_FLAG', 'STATEBREAK', 'MA',
+    'CBSA Title', 'County Name', 'STA', 'RGN', 'FO', 'FOName', 'CDBGFLAG', 'HOMEFLAG', 'CDBGHPL', 'HOMEHPL', 'YRPRIOR', 'AS',
+    'JOINT', 'MNI', 'AGL', 'TY61POP']
+
+##Create Ty61 County Total Records
+records_61 = PREMERGECOUNTIES.loc[:, desired_columns].copy() #Select all rows, desired columns
+records_61 = records_61.drop_duplicates()
+records_61['NAME'] = records_61['County Name'].astype(str)
+records_61['PLACE']= "99999"
+records_61['MCD']= "99999"
+records_61['UC']= "0"
+records_61['UCb4']= "0"
+records_61['HPL2']= "0000"
+records_61['SUMLEV']= "050"
+records_61['CONCIT']= "00000"
+records_61['CDBGTY']= "61"
+records_61['HOMETY']= "61"
+records_61['HPL2']= "0000"
+records_61['AS']= "1"
+records_61['FIPSKEY'] = records_61['ST'].astype(str) + records_61['CO'].astype(str)
+records_61.rename(columns={"TY61POP": latest_year_col}, inplace=True)
+
+
+
+##Append 61 Records
+common_columns = PREMERGECOUNTIES.columns.intersection(records_61.columns)
+records_61_filtered = records_61[common_columns]  # Filter records_61 to matching columns
+# Align the columns of records_61_filtered with PREMERGECOUNTIES
+records_61_reindexed = records_61_filtered.reindex(columns=PREMERGECOUNTIES.columns)
+PREMERGECOUNTIES = pd.concat([PREMERGECOUNTIES, records_61_reindexed], ignore_index=True)
+
+PREMERGECOUNTIES['CYCLE'] = '2'
+PREMERGECOUNTIES.loc[PREMERGECOUNTIES['MCDFLAG'] == 'T', 'PLACE'] = '99999'
+PREMERGECOUNTIES.loc[PREMERGECOUNTIES['MCDFLAG'] == 'N', 'MCD'] = '99999'
+
+desired_columns = [
+    "NAME",
+    "STA",
+    latest_year_col,
+    "STATEBREAK",
+    "SUMLEV",
+    "CDBGTY",
+    "HOMETY",
+    "UC",
+    "UCb4",
+    "CDBGFLAG",
+    "HOMEFLAG",
+    "CDBGHPL",
+    "HOMEHPL",
+    "HPL2",
+    "CNSRT",
+    "HPLC",
+    "CNSRTCYCLE",
+    "YRPRIOR",
+    "AS",
+    "JOINT",
+    "MCDFLAG",
+    "MNI",
+    "AGL",
+    "ZIP3",
+    "CYCLE",
+    "RGN",
+    "FO",
+    "FIPSKEY",
+    "ST",
+    "CO",
+    "PLACE",
+    "MCD",
+    "MA",
+
+]
+
+PREMERGECOUNTIES = PREMERGECOUNTIES[desired_columns].copy()
+PREMERGECITIES = PREMERGECITIES[desired_columns].copy()
+PREMERGECOUNTIES = PREMERGECOUNTIES.drop_duplicates()
+
+#Add a blank note
+PREMERGECOUNTIES.loc[:, 'Note'] = ""
+PREMERGECITIES.loc[:, 'Note'] = ""
+
+###Sum up population for duplicate place records. This is for Cities that were originally pulled from popestimates 071 summary level.
+non_numeric_cols = [col for col in PREMERGECOUNTIES.columns if col != 'POP' and pd.api.types.is_numeric_dtype(PREMERGECOUNTIES[col]) == False]
+PREMERGECOUNTIES['summed_latest_year'] = PREMERGECOUNTIES.groupby(non_numeric_cols)[latest_year_col].transform('sum')
+PREMERGECOUNTIES.loc[PREMERGECOUNTIES['summed_latest_year'] > PREMERGECOUNTIES[latest_year_col], latest_year_col] = PREMERGECOUNTIES['summed_latest_year']
+PREMERGECOUNTIES = PREMERGECOUNTIES.drop('summed_latest_year', axis=1)
+PREMERGECOUNTIES = PREMERGECOUNTIES.drop_duplicates()
+
+
+
+###Create Type 63 Records
+records_63 = PREMERGECOUNTIES[PREMERGECOUNTIES['NAME'].str.endswith('(pt.)')].copy()
+records_63['NAME'] = records_63['NAME'].str.replace(r'\(pt.\)', '(tot.)', regex=True)
+records_63 = records_63.rename(columns={latest_year_col: '64POP'})
+records_63['FIPSKEY'] = records_63["ST"]+records_63["PLACE"]
+records_63 = records_63.merge(Pop[['FIPSKEY', "POP"]], on='FIPSKEY', how='left')
+records_63 = records_63[records_63['64POP'] != records_63['POP']]
+records_63 = records_63[records_63['HOMETY'] != "62"].copy()
+records_63['HOMETY'] = "63"
+records_63['CDBGTY'] = "63"
+records_63['UC'] = "9"
+records_63['SUMLEV'] = "162"
+records_63 = records_63.rename(columns={"POP": latest_year_col})
+records_63 = records_63[desired_columns].copy()
+PREMERGECOUNTIES = pd.concat([PREMERGECOUNTIES, records_63], ignore_index=True)
+
+
+
+
+
+
+
+####Sort
+PREMERGECOUNTIES = PREMERGECOUNTIES.sort_values(by=['RGN','FO', 'FIPSKEY'], ascending=[True, True, True])
+
+#Remove CDBGTY
+PREMERGECOUNTIES.loc[:, 'CDBGTY'] = ""
+PREMERGECOUNTIES.loc[:, 'CDBGFLAG'] = ""
+PREMERGECOUNTIES.loc[:, 'CDBGHPL'] = ""
+PREMERGECOUNTIES.loc[:, 'CNSRTCYCLE'] = "2"
+PREMERGECOUNTIES.loc[:, 'CNSRT'] = "C000"
+
+PREMERGECITIES.loc[:, 'CDBGTY'] = ""
+PREMERGECITIES.loc[:, 'CDBGFLAG'] = ""
+PREMERGECITIES.loc[:, 'CDBGHPL'] = ""
+PREMERGECITIES.loc[:, 'CNSRTCYCLE'] = "2"
+
+PREMERGECITIES = PREMERGECITIES.rename(columns={'HOMEHPL': 'HPLC'})
+
+PREMERGECOUNTIES['MA'] = PREMERGECOUNTIES['MA'].fillna('00000')
+
+
+#Remove the duplicate row that has appeared
+PREMERGECITIES = PREMERGECITIES.loc[:,~PREMERGECITIES.columns.duplicated()]
+PREMERGECITIES.loc[:, 'HOMEHPL'] = "C000"
+PREMERGECITIES = PREMERGECITIES[desired_columns].copy()
+PREMERGECITIES.loc[:, 'Note'] = ""
+PREMERGECITIES.loc[PREMERGECITIES['HOMETY'] == '51', 'HOMETY'] = '91'
+PREMERGECITIES.loc[PREMERGECITIES['HOMETY'] == '52', 'HOMETY'] = '92'
+
+
+####Rename Note on Eligible_cities report, maybe figure out how to do this sooner later. 
+EligibleCounties = EligibleCounties.rename(columns={'Note': 'Metro City Flag'})
+####Extract columns so it's easier to read in Excel.
+desired_columns = ['STNAME', 'County Name', 'NAME', 'STA', latest_year_col, 'Metro City Flag', latest_year_col+'-Total', 'EligiblePop', 'CBSA Title', 'FOName', 'FIPSKEY', 'PRIMGEO_FLAG', 'SUMLEV', 'FUNCSTAT', 'MA', 'RGN', 'FO', 'ROFO']
+EligibleCounties = EligibleCounties[desired_columns].copy()
+
+
+
+#####Export File
+#####Export File
+#####Export File
+#####Export File
+with pd.ExcelWriter(OutputFolder+OutputFilename) as writer:
+    #Eligible_cities.to_excel(writer, index=False, sheet_name='CDBG Cities Report')
+    #EligibleCounties.to_excel(writer, index=False, sheet_name='CDBG Counties Report')
+    #CountySummary.to_excel(writer, index=False, sheet_name='CDBG Counties Summary')
+    PREMERGECITIES.to_excel(writer, index=False, sheet_name='Consortia City Records')
+    PREMERGECOUNTIES.to_excel(writer, index=False, sheet_name='Consortia Counties Records')

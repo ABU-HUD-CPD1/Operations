@@ -1,0 +1,160 @@
+#Program to Create CDBGTY30 Records for MERGE Database (FY25)
+
+import pandas as pd
+import os
+
+# Define the file paths
+output_folder = 'C:/Users/H45562\Desktop/New folder/'
+OMBList1_location = 'J:/COMS/Data and Program Library/OMB Data/2023 July/list1_2023.xlsx'
+ACS_location = 'J:/COMS/ACS/ACS 2018 2022/Data/Merged_Census_Data.xlsx'
+MERGE_Location = 'J:/COMS/MERGE/MERGE FY25/MERGE.xlsx'
+Census_Population_Estimates_File_Location= 'J:/COMS/POP/2023/sub-est2023.csv'
+
+
+State_Abbreviations = {
+    'STA': ['AL', 'AK', 'AZ', 'AR', 'CA', 'CO', 'CT', 'DE', 'DC', 'FL', 'GA', 'HI', 'ID', 'IL', 'IN', 'IA', 'KS', 'KY', 'LA', 'ME', 'MD', 'MA', 'MI', 'MN', 'MS', 'MO', 'MT', 'NE', 'NV', 'NH', 'NJ', 'NM', 'NY', 'NC', 'ND', 'OH', 'OK', 'OR', 'PA', 'RI', 'SC', 'SD', 'TN', 'TX', 'UT', 'VT', 'VA', 'WA', 'WV', 'WI', 'WY', 'AS', 'GU', 'MP', 'PR', 'VI'],
+    'FIPS': ['01', '02', '04', '05', '06', '08', '09', '10', '11', '12', '13', '15', '16', '17', '18', '19', '20', '21', '22', '23', '24', '25', '26', '27', '28', '29', '30', '31', '32', '33', '34', '35', '36', '37', '38', '39', '40', '41', '42', '44', '45', '46', '47', '48', '49', '50', '51', '53', '54', '55', '56', '60', '66', '69', '72', '78']
+}
+
+
+try:
+    ACSData = pd.read_excel(ACS_location, converters={'GEOID': str, 'FIPSKEY': str, 'SUMLEV': str, 'STATE': str, 'COUNTY': str, 'COUSUB': str, 'PLACE': str})
+except FileNotFoundError:
+    print(f"Error: ACS Data not found at {ACS_location}")
+    exit()
+
+try:
+    OMBList1 = pd.read_excel(OMBList1_location, converters={'CBSA Code': str, 'Metropolitan Division Code': str, 'FIPS State Code': str, 'FIPS County Code': str}, skiprows=2)
+    OMBList1['MA'] = OMBList1['Metropolitan Division Code'].where(OMBList1['Metropolitan Division Code'].notnull(), OMBList1['CBSA Code'])
+    OMBList1['MANAME'] = OMBList1['Metropolitan Division Title'].where(OMBList1['Metropolitan Division Title'].notnull(), OMBList1['CBSA Title'])
+    OMBList1['FIPSKEY'] = OMBList1['FIPS State Code'] + OMBList1['FIPS County Code']
+    OMBList1 = OMBList1[OMBList1['Metropolitan/Micropolitan Statistical Area'] != 'Micropolitan Statistical Area'] # Remove Micropolitan Areas from OMB MSA list
+except FileNotFoundError:
+    print(f"Error: OMB Data not found at {OMBList1_location}")
+    exit()
+
+try:
+    POP = pd.read_csv(Census_Population_Estimates_File_Location, converters={'SUMLEV': str, 'STATE': str, 'COUNTY': str, 'PLACE': str, 'COUSUB': str, 'CONCIT': str, 'PRIMGEO_FLAG': str}, engine='python', encoding='latin1')
+    POP.loc[POP['SUMLEV'] == '050', ['FIPSKEY']] = POP["STATE"]+POP["COUNTY"]
+    # Find columns in POP file starting with 'POPESTIMATE'
+    POP_estimate_cols = [col for col in POP.columns if col.startswith('POPESTIMATE')]
+    if POP_estimate_cols:
+        # Extract the year from the column names
+        years = [int(col.replace('POPESTIMATE', '')) for col in POP_estimate_cols]
+        # Find the column with the latest year
+        latest_year_col = POP_estimate_cols[years.index(max(years))]
+        # Rename the latest year column to 'POP'
+        POP = POP.rename(columns={latest_year_col: 'POP'})
+except FileNotFoundError:
+    print(f"Error: Census Population file not found at {Census_Population_Estimates_File_Location}")
+    exit()
+
+try:
+    MERGE = pd.read_excel(MERGE_Location, converters={'CDBGTY': str, 'CDBGHPL': str, 'ST': str, 'CO': str, 'UC': str, 'MA': str, 'RGN': str, 'FO': str, 'CYCLE': str, 'AGL': str})
+except FileNotFoundError:
+    print(f"Error: MERGE file not found at {MERGE_Location}")
+    exit()
+
+# Define Method to Check for invalid MA codes within MSA file.
+def is_five_digit_numeric(value):
+    """Checks if a value is a 5-digit numeric string."""
+    if isinstance(value, str) and len(value) == 5 and value.isdigit():
+        return True
+    return False
+
+# Remove invalid MA codes within MSA file.
+OMBList1 = OMBList1[OMBList1['MA'].apply(is_five_digit_numeric)]
+
+# Merge OMB MSA list to Census Data
+MSASummary = pd.merge(ACSData, OMBList1[['FIPSKEY', 'MA','MANAME', 'State Name']], on='FIPSKEY', how='inner').copy()
+
+# Merge in Pop Data
+MSASummary = pd.merge(MSASummary, POP[['FIPSKEY', 'POP']], on='FIPSKEY', how='inner').copy()
+
+# Keep ONLY SUMLEV = '050'
+#MSASummary = MSASummary[MSASummary['SUMLEV'] == '050'].copy()
+
+# Create FIPSKEY1 column
+MSASummary['FIPSKEY1'] = 'MSA' + MSASummary['FIPSKEY'].str[:2].astype(str) + MSASummary['MA'].fillna('').astype(str)
+
+#Add Statebreak
+MSASummary['STATEBREAK'] = MSASummary['State Name'] 
+
+# Specify the desired columns to aggregate
+output_columns = ['FIPSKEY1', 'MANAME', 'MA', 'STATEBREAK',
+                  'POPACS', 'OCROWD', 'POV', 'PRE40', 'POVU', 'RENTOCC',
+                  'TRH', 'VACRENT', 'TRHC4', 'TRHPOV', 'FAMPOV', 'FAMPOVU',
+                  'P50RHP', 'PCI', 'AGGINCOME', 'POP']
+
+# Select only the specified columns in the correct order
+MSASummary = MSASummary[output_columns].copy()
+MSASummary['NAME']=MSASummary['MANAME']
+
+# Aggregate data by MSA and State.
+aggregated_data = MSASummary.groupby(['FIPSKEY1']).agg({
+    'STATEBREAK': 'first',
+    'NAME': 'first',
+    'MA': 'first',
+    'POPACS': 'sum',
+    'OCROWD': 'sum',
+    'POV': 'sum',
+    'PRE40': 'sum',
+    'POVU': 'sum',
+    'RENTOCC': 'sum',
+    'TRH': 'sum',
+    'VACRENT': 'sum',
+    'TRHC4': 'sum',
+    'TRHPOV': 'sum',
+    'FAMPOV': 'sum',
+    'FAMPOVU': 'sum',
+    'P50RHP': 'sum',
+    'AGGINCOME': 'sum',
+    'PCI': 'sum',
+    'POP': 'sum',
+}).reset_index()
+
+# Calculate PCI after aggregation and round it to 0 decimal places
+aggregated_data['PCI'] = round(aggregated_data['AGGINCOME'] / aggregated_data['POPACS'], 0)
+
+# Create FIPSKEY1 column
+aggregated_data['FIPSKEY'] = aggregated_data['FIPSKEY1']
+
+# Specify the desired output columns
+output_columns = ['FIPSKEY', 'NAME', 'MA',
+                  'POPACS', 'OCROWD', 'POV', 'PRE40', 'POVU', 'RENTOCC',
+                  'TRH', 'VACRENT', 'TRHC4', 'TRHPOV', 'FAMPOV', 'FAMPOVU',
+                  'P50RHP', 'PCI', 'AGGINCOME', 'POP','STATEBREAK']
+
+# Select only the specified columns in the correct order
+aggregated_data = aggregated_data[output_columns]
+
+#Update Fields For MERGE Formatting and order structure
+MERGE_copy = MERGE.copy()  # Copy the DataFrame structure and data
+MERGE_copy = MERGE_copy.iloc[0:0] # Delete all rows
+MERGE_copy = pd.concat([MERGE_copy, aggregated_data], ignore_index=True)
+MERGE_copy['CDBGTY']="30"
+MERGE_copy['CDBGFLAG']="C"
+MERGE_copy['CDBGHPL']="0000"
+MERGE_copy['HPL2']="0000"
+MERGE_copy['ST'] = MERGE_copy['FIPSKEY'].str[3:5].astype(str)
+MERGE_copy['SUMLEV']="311"
+MERGE_copy['AGL']="0"
+MERGE_copy['MNI']="0"
+MERGE_copy['AS']="0"
+MERGE_copy['STA'] = MERGE_copy['ST'].astype(str).str[:2].map(dict(zip(State_Abbreviations['FIPS'], State_Abbreviations['STA'])))
+
+#Rename Pop Columns back to original titles
+MERGE_copy = MERGE_copy.rename(columns={'POP': latest_year_col}) # Where latest_year_col is the original name
+
+# Save the updated MERGE_filtered DataFrame
+output_merge_path = os.path.join(output_folder, "MERGE_Updated_TY30_Records.xlsx")
+
+try:
+    MERGE_copy.to_excel(output_merge_path, index=False)
+    print(f"Updated MERGE data saved to {output_merge_path}")
+except FileNotFoundError:
+    print(f"Error: Output folder not found or write permissions denied at {output_folder}")
+except Exception as e:
+    print(f"An error occurred while saving the updated MERGE data: {e}")
+else:
+    print("Finished!")
