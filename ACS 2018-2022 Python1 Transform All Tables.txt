@@ -1,0 +1,90 @@
+## HUD-CPD Internal Data Processing Program to Import and Transform data from PD&R Servers. There is a following program to Merge and Aggregate the data.
+
+import pandas as pd
+import numpy as np
+import os
+
+# User Inputs (using a dictionary for better organization and multiple tables)
+census_data_info = {
+    'B01003': {'variables': [1]},    # Please check against actual variable from the data dictionary
+    'B17001': {'variables': [1,2]},  # Please check against actual variable from the data dictionary
+    'B17010': {'variables': [1,2]},  # Please check against actual variable from the data dictionary
+    'B19301': {'variables': [1]},    # Please check against actual variable from the data dictionary
+    'B19313': {'variables': [1]},    # Please check against actual variable from the data dictionary
+    'B25003': {'variables': [1,2,3]},  # Please check against actual variable from the data dictionary
+    'B25004': {'variables': [1,2,3]},  # Please check against actual variable from the data dictionary
+    'B25014': {'variables': [5,6,7,11,12,13]},  # Please check against actual variable from the data dictionary
+    'B25034': {'variables': [11]},              # Please check against actual variable from the data dictionary
+    'B25123': {'variables': [9,10,11,12]},      # Please check against actual variable from the data dictionary
+    'S107C02': {'variables': [23,24,32,33]},    # Please check against actual variable from the data dictionary
+    # Add other tables here following the same structure:
+    # 'b17001': {'variables': [1, 2, 5, ...]},  # Example
+    # 'b25003': {'variables': [1, 2, 3, ...]},  # Example
+    # ...
+}
+
+DataLocation = '//Hdcbnad1449/ACS_5YR_2020/ACS_5YR_2022/standard_tables_070/part2-070/'
+OutputFolder = 'C:/Users/H45562/Desktop/New folder/'  # Or use a more robust way to define paths
+# Ensure the output directory exists
+os.makedirs(OutputFolder, exist_ok=True)
+
+for CensusDataTable, info in census_data_info.items():
+    Variables = info['variables']  # Get the variables for the current table
+    OutputFilename = CensusDataTable
+
+    try:
+        # Import Data (more efficient gzip handling)
+        filepath = os.path.join(DataLocation, f"{CensusDataTable}.sas7bdat.gz")
+        DataImport = pd.read_sas(filepath, encoding='unicode_escape')
+
+        # Transform Data (using .loc for clarity and potential efficiency)
+        DataImport["ORDER"] = pd.to_numeric(DataImport["ORDER"])
+        DataImport['CEST'] = DataImport['CEST'].fillna(0)  # More concise way to replace NaNs
+        DataImport = DataImport.loc[DataImport['ORDER'].isin(Variables)]
+
+        # Extract geographic information (using .str accessor for consistency)
+        DataImport['STATE'] = DataImport['GEOID'].str[9:11]
+        DataImport['COUNTY'] = DataImport['GEOID'].str[11:14]
+        DataImport['COUSUB'] = DataImport['GEOID'].str[14:19]
+        DataImport['PLACE'] = DataImport['GEOID'].str[19:24]
+
+        # Pivot the data
+        TRANSPOSED = DataImport.pivot(index=["tblid", "GEOID", "STATE", "COUNTY", "COUSUB", "PLACE", "geoname"],
+                                      columns=["ORDER", "title"], values=["CEST", "CME"])
+        TRANSPOSED = TRANSPOSED.reset_index()
+
+        # Flatten MultiIndex columns (Corrected)
+        new_cols = []
+        for col in TRANSPOSED.columns.values:
+            new_col_parts = []
+            for part in col:
+                if isinstance(part, float):  # Check if part is a float
+                    new_col_parts.append(str(int(part))) # Convert float to int then to string
+                else:
+                    new_col_parts.append(str(part))  # Convert other parts to string
+            new_cols.append("_".join(new_col_parts).strip())
+        TRANSPOSED.columns = new_cols # this is the key fix
+
+        # Convert CEST/CME columns to numeric, handling potential issues
+        for col in TRANSPOSED.columns:
+            if col.startswith("CEST") or col.startswith("CME"):
+                try:
+                    # Clean up the string before conversion:
+                    TRANSPOSED[col] = TRANSPOSED[col].astype(str).str.replace(r'[^\d.-]', '', regex=True) #remove all non-numeric characters except .
+                    TRANSPOSED[col] = pd.to_numeric(TRANSPOSED[col], errors='coerce') # convert to number, coerce errors to NaN
+                except Exception as e:
+                    print(f"Error converting column {col}: {e}")
+                    TRANSPOSED[col] = np.nan  # Or handle the error as needed
+
+        # Export Data
+        output_path = os.path.join(OutputFolder, f"{OutputFilename}.xlsx")
+        TRANSPOSED.to_excel(output_path, sheet_name=CensusDataTable, index=False)
+
+        print(f"Processed and saved: {CensusDataTable}")
+
+    except FileNotFoundError:
+        print(f"File not found: {CensusDataTable}")
+    except Exception as e:
+        print(f"An error occurred with {CensusDataTable}: {e}")
+
+print("Finished processing all tables.")

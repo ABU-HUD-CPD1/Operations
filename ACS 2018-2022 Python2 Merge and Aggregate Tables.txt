@@ -1,0 +1,275 @@
+## HUD-CPD Internal Data Processing Program to Merge and Aggregate Census Data. There is a preceeding program to import and transform the data from PD&R's shared drive.
+
+##Must import Modules First
+import pandas as pd
+import os
+
+## User Input (): Set IOutput Folder/Filename:
+InputFolder = 'C:/Users/H45562/Desktop/New folder/'  ## This is where the tables from step 1 are stored. it'll also be the output folder.
+output_filename = "Merged_Census_Data.xlsx"  # Or any name you prefer
+output_path = os.path.join(InputFolder, output_filename)  # Combine folder and filename
+FileNames = ["B01003","B17001","B17010", "B19301", "B19313", "B25003", "B25004", "B25014", "B25034", "B25123", "S107C02"] # you don't need to include the .xlsx
+
+##Start working
+# Dictionary to store DataFrames, where keys are filenames
+dfs = {}
+
+#Import the required data files we defined earlier.
+for FileName in FileNames:
+    FilePath = os.path.join(InputFolder, FileName + ".xlsx")
+
+    try:
+        xls = pd.ExcelFile(FilePath)  # Use pd.ExcelFile to handle multiple sheets
+        for sheet_name in xls.sheet_names:  # Iterate through each sheet in the Excel file
+            df = pd.read_excel(xls, sheet_name=sheet_name)
+            df.name = f"{FileName}_{sheet_name}" #DataFrame name is filename_sheetname
+            dfs[df.name] = df  # Store the DataFrame in the dictionary, using filename_sheetname as the key.
+            print(f"Successfully imported {FileName} - {sheet_name}")
+
+    except FileNotFoundError:
+        print(f"Error: File not found: {FilePath}")
+    except pd.errors.EmptyDataError:
+        print(f"Error: File is empty: {FilePath}")
+    except Exception as e:
+        print(f"An error occurred while reading {FilePath}: {e}")
+
+# Now we have a dictionary 'dfs' where:
+# - Keys are the filenames (e.g., "B17001_B17001",  "B17010_B17010", "B19301_B19301",etc.)
+# - Values are the corresponding DataFrames
+
+
+# Now, let's sum up and rename variables to match the MERGE Data Dictionary:
+## Be sure to pull out the variables we'll need for Total Rental Housing (TRH).
+    
+if "B01003_B01003" in dfs:
+    B01003_B01003_df = dfs["B01003_B01003"]
+    B01003_B01003_df["POPACS"]=B01003_B01003_df['CEST_1_Total']
+    B01003_B01003_df.drop('tblid__', axis=1, inplace=True)
+    B01003_B01003_df.drop('CEST_1_Total', axis=1, inplace=True)
+    B01003_B01003_df.drop('CME_1_Total', axis=1, inplace=True)
+else:
+    print("DataFrame for Table B01003 not found.")
+
+if "B17001_B17001" in dfs:
+    B17001_B17001_df = dfs["B17001_B17001"]
+    B17001_B17001_df["POV"]=B17001_B17001_df["CEST_2_Income in the past 12 months below poverty level:"]
+    B17001_B17001_df["POVU"]=B17001_B17001_df["CEST_1_Total:"]
+    B17001_B17001_df.drop('tblid__', axis=1, inplace=True)
+    B17001_B17001_df.drop('CEST_1_Total:', axis=1, inplace=True)
+    B17001_B17001_df.drop('CME_1_Total:', axis=1, inplace=True)
+else:
+    print("DataFrame for Table B17001 not found.")
+
+if "B17010_B17010" in dfs:
+    B17010_B17010_df = dfs["B17010_B17010"]
+    B17010_B17010_df["FAMPOV"]=B17010_B17010_df["CEST_2_Income in the past 12 months below poverty level:"]
+    B17010_B17010_df["FAMPOVU"]=B17010_B17010_df["CEST_1_Total:"]
+    B17010_B17010_df.drop('tblid__', axis=1, inplace=True)
+    B17010_B17010_df.drop('CEST_1_Total:', axis=1, inplace=True)
+    B17010_B17010_df.drop('CME_1_Total:', axis=1, inplace=True)
+else:
+    print("DataFrame for Table B17010 not found.")
+
+if "B19301_B19301" in dfs:
+    B19301_B19301_df = dfs["B19301_B19301"]
+    B19301_B19301_df["PCI"]=B19301_B19301_df["CEST_1_Per capita income in the past 12 months (in 2021 inflation-adjusted dollars)"]
+    B19301_B19301_df.drop('tblid__', axis=1, inplace=True)
+else:
+    print("DataFrame for Table B19301 not found.")
+
+if "B19313_B19313" in dfs:
+    B19313_B19313_df = dfs["B19313_B19313"]
+    B19313_B19313_df["AGGRINC"]=B19313_B19313_df["CEST_1_Aggregate income in the past 12 months (in 2021 inflation-adjusted dollars)"]
+    B19313_B19313_df.drop('tblid__', axis=1, inplace=True)
+else:
+    print("DataFrame for Table B19313 not found.")
+
+if "B25003_B25003" in dfs:
+    B25003_B25003_df = dfs["B25003_B25003"]
+    B25003_B25003_df["RENTOCC"]=B25003_B25003_df["CEST_3_Renter occupied"]
+    B25003_B25003_df["B25003est3"]=B25003_B25003_df["CEST_3_Renter occupied"]
+    B25003_B25003_df.drop('tblid__', axis=1, inplace=True)
+else:
+    print("DataFrame for Table B25003 not found.")
+
+if "B25004_B25004" in dfs:
+    B25004_B25004_df = dfs["B25004_B25004"]
+    B25004_B25004_df["VACRENT"]=B25004_B25004_df["CEST_2_For rent"]
+    B25004_B25004_df["B25004est2"]=B25004_B25004_df["CEST_2_For rent"]
+    B25004_B25004_df["B25004est3"]=B25004_B25004_df["CEST_3_Rented, not occupied"]
+    B25004_B25004_df.drop('tblid__', axis=1, inplace=True)
+else:
+    print("DataFrame for Table B25004 not found.")
+
+if "B25014_B25014" in dfs:
+    B25014_B25014_df = dfs["B25014_B25014"]
+    B25014_B25014_df["OCROWD"]=B25014_B25014_df["CEST_5_1.01 to 1.50 occupants per room"]+B25014_B25014_df["CEST_6_1.51 to 2.00 occupants per room"]+B25014_B25014_df["CEST_7_2.01 or more occupants per room"]+B25014_B25014_df["CEST_11_1.01 to 1.50 occupants per room"]+B25014_B25014_df["CEST_12_1.51 to 2.00 occupants per room"]+B25014_B25014_df["CEST_13_2.01 or more occupants per room"]
+    B25014_B25014_df.drop('tblid__', axis=1, inplace=True)
+else:
+    print("DataFrame for Table B25014 not found.")
+
+if "B25034_B25034" in dfs:
+    B25034_B25034_df = dfs["B25034_B25034"]
+    B25034_B25034_df["PRE40"]=B25034_B25034_df["CEST_11_Built 1939 or earlier"]
+    B25034_B25034_df.drop('tblid__', axis=1, inplace=True)
+else:
+    print("DataFrame for Table B25034 not found.")
+
+if "B25123_B25123" in dfs:
+    B25123_B25123_df = dfs["B25123_B25123"]
+    B25123_B25123_df["TRHC4"]=B25123_B25123_df["CEST_9_With one selected condition"]+B25123_B25123_df["CEST_10_With two selected conditions"]+B25123_B25123_df["CEST_11_With three selected conditions"]+B25123_B25123_df["CEST_12_With four selected conditions"]
+    B25123_B25123_df.drop('tblid__', axis=1, inplace=True)
+else:
+    print("DataFrame for Table B25123 not found.")
+
+if "S107C02_S107C02" in dfs:
+    S107C02_S107C02_df = dfs["S107C02_S107C02"]
+    S107C02_S107C02_df["P50RHP"]=S107C02_S107C02_df["CEST_24_Structure built in 1949 or earlier"]+S107C02_S107C02_df["CEST_33_Structure built in 1949 or earlier"]
+    S107C02_S107C02_df["TRHPOV"]=S107C02_S107C02_df["CEST_23_Household below poverty level"]+S107C02_S107C02_df["CEST_32_Household below poverty level"]
+    S107C02_S107C02_df.drop('tblid__', axis=1, inplace=True)
+else:
+    print("DataFrame for Table S107C02 not found.")
+
+# Now, let's Outer Join our imported DataFrames one by one
+
+merged_df = pd.DataFrame()  # Start with an empty DataFrame
+common_keys = ["GEOID__", "STATE__", "COUNTY__","COUSUB__","PLACE__","geoname__"]
+for name, df in dfs.items():
+    if merged_df.empty:  # First DataFrame, just assign it
+        merged_df = df
+    else:  # Subsequent DataFrames, perform the merge
+        try:
+           merged_df = pd.merge(merged_df, df, on=common_keys, how='outer') # or 'left', 'right', 'outer' as needed
+           print(f"Successfully joined {name}")
+        except KeyError as e:
+           print(f"Error: Key field {e} not found in DataFrame {name}. Skipping join.")
+           # You might want to handle this differently, like exiting the script.
+        except Exception as e:
+           print(f"An error occurred during join with {name}: {e}")
+
+#Now, let's Fix Null Values in the joined table by replacing them with "0"
+merged_df.fillna({"POPACS": 0}, inplace=True)  # Fill NaN/Null with 0
+merged_df.fillna({"FAMPOV": 0}, inplace=True)  # Fill NaN/Null with 0
+merged_df.fillna({"FAMPOVU": 0}, inplace=True)  # Fill NaN/Null with 0
+merged_df.fillna({"POV": 0}, inplace=True)  # Fill NaN/Null with 0
+merged_df.fillna({"POVU": 0}, inplace=True)  # Fill NaN/Null with 0
+merged_df.fillna({"PCI": 0}, inplace=True)  # Fill NaN/Null with 0
+merged_df.fillna({"AGGRINC": 0}, inplace=True)  # Fill NaN/Null with 0
+merged_df.fillna({"RENTOCC": 0}, inplace=True)  # Fill NaN/Null with 0
+merged_df.fillna({"B25003est3": 0}, inplace=True)  # Fill NaN/Null with 0
+merged_df.fillna({"VACRENT": 0}, inplace=True)  # Fill NaN/Null with 0
+merged_df.fillna({"B25004est2": 0}, inplace=True)  # Fill NaN/Null with 0
+merged_df.fillna({"B25004est3": 0}, inplace=True)  # Fill NaN/Null with 0
+merged_df.fillna({"OCROWD": 0}, inplace=True)  # Fill NaN/Null with 0
+merged_df.fillna({"PRE40": 0}, inplace=True)  # Fill NaN/Null with 0
+merged_df.fillna({"TRHC4": 0}, inplace=True)  # Fill NaN/Null with 0
+merged_df.fillna({"P50RHP": 0}, inplace=True)  # Fill NaN/Null with 0
+merged_df.fillna({"TRHPOV": 0}, inplace=True)  # Fill NaN/Null with 0 
+
+#Now we can calculate Total Rental Housing
+merged_df["TRH"]= merged_df["B25004est2"]+merged_df["B25004est3"]+merged_df["B25003est3"]
+
+# Recalculate Occupied Rental Units
+merged_df["RENTOCC"]=merged_df["TRH"]-merged_df["VACRENT"]
+
+
+#Let's Fix up the Column Names that got screwy during import because of multiple levels of headers
+merged_df.rename(columns={"GEOID__": "GEOID"}, inplace=True)
+merged_df.rename(columns={"STATE__": "STATE"}, inplace=True)
+merged_df.rename(columns={"COUNTY__": "COUNTY"}, inplace=True)
+merged_df.rename(columns={"COUSUB__": "COUSUB"}, inplace=True)
+merged_df.rename(columns={"PLACE__": "PLACE"}, inplace=True)
+merged_df.rename(columns={"geoname__": "geoname"}, inplace=True)
+
+# lets Fix Fipskey Fields to ensure they are text with leading zeros
+merged_df["STATE"] = merged_df["STATE"].astype(str).str.zfill(2)
+merged_df["COUNTY"] = merged_df["COUNTY"].astype(str).str.zfill(3)
+merged_df["COUSUB"] = merged_df["COUSUB"].astype(str).str.zfill(5)
+merged_df["PLACE"] = merged_df["PLACE"].astype(str).str.zfill(5)
+
+# Remove columns starting with "CEST" or "CME"
+cols_to_remove = [col for col in merged_df.columns if col.startswith("CEST") or col.startswith("CME")]
+merged_df.drop(cols_to_remove, axis=1, inplace=True)
+
+# Recode CDP Place FIPS with "99990" in PLACE column
+## When I wrote this (2.7.25) I was not able to identify any incorproated towns or cities in the united states that
+## contain the letters "CDP". add a space before CDP to be more specific if possible.
+merged_df.loc[merged_df['geoname'].str.contains(" CDP"), 'PLACE'] = "99990"
+merged_df.loc[merged_df['PLACE'].str.contains("99999"), 'PLACE'] = "99990"
+
+#Add Summary Level and FIPSKEY to our table
+merged_df["SUMLEV"]="Original"
+merged_df["FIPSKEY"]=merged_df["STATE"]
+
+###Now Let's Aggregate the Data to the Summary Levels
+
+print("Aggregating data to summary levels....")
+
+# Aggregate by State for records for 040.
+#Fist we find the original records where SUMLEV is "Original", excluding specified columns
+original_records = merged_df[merged_df["SUMLEV"] == "Original"]
+# List of columns to exclude from aggregation
+exclude_cols = ["GEOID", "STATE", "COUNTY", "COUSUB", "PLACE", "geoname"]
+# Columns to aggregate (all columns except the excluded ones and STATE)
+cols_to_agg = [col for col in original_records.columns if col not in exclude_cols and col != "FIPSKEY"]
+state_summary = original_records.groupby("FIPSKEY")[cols_to_agg].sum().reset_index() # Aggregate only the desired columns
+state_summary["SUMLEV"] = "040"
+merged_df = pd.concat([merged_df, state_summary], ignore_index=True)
+print("States (040) Completed")
+
+# Aggregate by County for records for 050.
+original_records["FIPSKEY"]=original_records["STATE"]+original_records["COUNTY"]
+cols_to_agg = [col for col in original_records.columns if col not in exclude_cols and col != "FIPSKEY"]
+county_summary = original_records.groupby("FIPSKEY")[cols_to_agg].sum().reset_index() # Aggregate only the desired columns
+county_summary["SUMLEV"] = "050"
+merged_df = pd.concat([merged_df, county_summary], ignore_index=True)
+print("Counties (050) Completed")
+
+# Aggregate by Cousub for records for 060.
+original_records["FIPSKEY"]=original_records["STATE"]+original_records["COUNTY"]+original_records["COUSUB"]
+cols_to_agg = [col for col in original_records.columns if col not in exclude_cols and col != "FIPSKEY"]
+cousub_summary = original_records.groupby("FIPSKEY")[cols_to_agg].sum().reset_index() # Aggregate only the desired columns
+cousub_summary["SUMLEV"] = "060"
+merged_df = pd.concat([merged_df, cousub_summary], ignore_index=True)
+print("County Subdivisions (060) Completed")
+
+# Aggregate by Place(part) and county for records for 155.
+original_records["FIPSKEY"]=original_records["STATE"]+original_records["COUNTY"]+original_records["PLACE"]
+cols_to_agg = [col for col in original_records.columns if col not in exclude_cols and col != "FIPSKEY"]
+placeparts_summary = original_records.groupby("FIPSKEY")[cols_to_agg].sum().reset_index() # Aggregate only the desired columns
+placeparts_summary["SUMLEV"] = "155"
+merged_df = pd.concat([merged_df, placeparts_summary], ignore_index=True)
+print("Place-parts (155) Completed")
+
+# Aggregate by Place for records for 160.
+original_records["FIPSKEY"]=original_records["STATE"]+original_records["PLACE"]
+cols_to_agg = [col for col in original_records.columns if col not in exclude_cols and col != "FIPSKEY"]
+placetot_summary = original_records.groupby("FIPSKEY")[cols_to_agg].sum().reset_index() # Aggregate only the desired columns
+placetot_summary["SUMLEV"] = "160"
+merged_df = pd.concat([merged_df, placetot_summary], ignore_index=True)
+print("Place-totals (160) Completed")
+
+# Aggregate by all FIPS codes for summary level 070. note: place codes were re-coded to exclude CPD's when calcualating balance records.
+original_records["FIPSKEY"]=original_records["STATE"]+original_records["COUNTY"]+original_records["COUSUB"]+original_records["PLACE"]
+cols_to_agg = [col for col in original_records.columns if col not in exclude_cols and col != "FIPSKEY"]
+sum070_summary = original_records.groupby("FIPSKEY")[cols_to_agg].sum().reset_index() # Aggregate only the desired columns
+sum070_summary["SUMLEV"] = "070"
+merged_df = pd.concat([merged_df, sum070_summary], ignore_index=True)
+print("Place-CountySubs (070) Completed")
+
+##Recalculate PCI for created records.
+merged_df.loc[merged_df['SUMLEV'] != "Original", "PCI"] = round(merged_df.loc[merged_df['SUMLEV'] != "Original", "AGGRINC"] / merged_df.loc[merged_df['SUMLEV'] != "Original", "POPACS"], 0)
+merged_df.fillna({"PCI": 0}, inplace=True)  # Fill NaN/Null with 0
+
+##Clean up a bit
+merged_df.loc[merged_df["SUMLEV"] == "Original", ["SUMLEV", "FIPSKEY"]] = None
+#Replace Original Place Codes on Original Records
+merged_df.loc[merged_df['SUMLEV'].isnull(), 'PLACE'] = merged_df['GEOID'].str[-5:]
+
+##All done We can Export Merged Data File to Excel
+print("Processing Export....")
+try:
+    merged_df.to_excel(output_path, index=False, sheet_name='ACSData')  # Export to Excel, no index
+    print(f"Successfully exported merged data to: {output_path}")
+except Exception as e:
+    print(f"An error occurred during export: {e}")
