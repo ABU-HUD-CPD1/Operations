@@ -1,0 +1,367 @@
+###########################################################
+###########################################################
+##     HUD/CPD/OPS/SDED: CDBG Calculation in Python!     ##
+##        Written by Abu Zuberi, September 2022          ##
+##        Updated by Abu Zuberi, April 2023              ##
+##                     ❀♡❀⊱✿⊰❀♡❀                    ##
+##     This program takes CPD-SDED's "MERGE" database    ##
+##           and outputs CDBG Allocations.               ##
+###########################################################
+###########################################################
+
+## User Input (1/4): MERGE Import Location:
+MERGELocation = './Data/Unprocessed/Merge 4.16.xlsx'
+#CPDFieldOfficeNamesLocation = 'J:/COMS/Data and Program Library/CPD Field Office Data/Field Office Codes.xlsx' #data added below, no import needed.
+
+## User Input (2/4): Set Output Folder/Filename:
+OutputFolder = './' #for Abu
+#OutputFolder = 'C:/Users/H50930/OneDrive - US Department of Housing and Urban Development/Desktop/New folder/' #for Julie
+#OutputFolder = 'J:/COMS/CDBG/CDBG25/' #For Dwight
+OutputFilename = 'CDBG25PyOut.xlsx'
+
+## User Input (3/4): Set Appropriation and Insular Area Set-Aside Amounts:
+Appropriation = 3_300_000_000
+InsularSetAside = 7_000_000
+EntitlementFunding =((Appropriation-InsularSetAside)*(70/100))
+NonEntitlementFunding=((Appropriation-InsularSetAside)*(30/100))
+
+
+## User Input (4/4): Select MERGE population column name for calculation.
+## Enter with "quotations". Like "POP20", or "POP21":
+
+    #POPYearCurrent= "POP23"  #Replaced by automated function below. Finds max pop year under 60 (since 1960 pop is in MERGE as POP60)
+
+def find_max_pop_year_under_60(df):
+    """
+    Finds the column name with the maximum population year under 60 from a pandas DataFrame, without using regular expressions.
+
+    Args:
+        df (pd.DataFrame): The input DataFrame containing population year columns.
+
+    Returns:
+        str: The column name with the maximum population year, or None if no matching columns are found.
+    """
+    pop_years = [col for col in df.columns if col.startswith('POP') and col[3:].isdigit()] # find columns that start with POP and then digits
+
+    valid_years = [col for col in pop_years if int(col[3:]) < 60] # check if the year is below 60
+
+    if not valid_years:
+        return None  # No valid columns found
+
+    max_year = 0
+    max_year_column = None
+
+    for col in valid_years:
+        year_num = int(col[3:])
+        if year_num > max_year:
+            max_year = year_num
+            max_year_column = col
+
+    return max_year_column
+
+
+#####################################
+## MERGE is keyed on ST+CDBGHPL
+## MERGE County (CDBGTY=61) totals = (County) - (non-participating place parts) - (participating whole place parts) + (participating whole places)
+## MERGE State (CDBGTY=22) totals = (State) - (Cities) - (Counties) - (AIAN Areas)
+######################################
+
+# import Pandas numerical analysis plug-ins, import time for timer:
+import time
+start_time = time.time()
+import pandas as pd
+# Tell Pandas not to truncate when printing:
+pd.options.display.max_columns = None
+pd.options.display.max_rows = None
+
+# Inform User that Calculation has started
+print("Calculating CDBG......")
+
+# Import MERGE (assumes formatted as EXCEL.xlsx), ensure indexing fields are formatted as text
+
+MERGE=(pd.DataFrame(pd.read_excel(MERGELocation,converters={'CDBGTY':str,'CDBGHPL':str,'ST':str,'CO':str, 'UC':str,'MA':str,'RGN':str,'FO':str,'CYCLE':str, 'AGL':str})))[(pd.DataFrame(pd.read_excel(MERGELocation,converters={'CDBGTY':str,'CDBGHPL':str,'ST':str,'CO':str, 'UC':str,'MA':str,'RGN':str,'FO':str,'CYCLE':str, 'AGL':str})))['CDBGFLAG']=="C"]
+#CPDFieldOfficeNames=pd.DataFrame(pd.read_excel(CPDFieldOfficeNamesLocation,converters={'ROFO':str}))
+
+# Remove year from Population column, i.e. "POP20" becomes "POP"
+# This is to reduce effort for annual updates.
+POPYearCurrent= find_max_pop_year_under_60(MERGE)
+MERGE.rename(columns={POPYearCurrent:"POP"},inplace = True)
+
+
+CPDFieldOfficeNames = {
+    ('01', '01'): 'Boston',
+    ('01', '26'): 'Hartford',
+    ('02', '01'): 'New York City',
+    ('02', '06'): 'Buffalo',
+    ('02', '39'): 'Newark',
+    ('03', '01'): 'Philadelphia',
+    ('03', '06'): 'Baltimore',
+    ('03', '28'): 'Pittsburgh',
+    ('03', '36'): 'Richmond',
+    ('03', '39'): 'Washington D.C.',
+    ('04', '01'): 'Atlanta',
+    ('04', '09'): 'Birmingham',
+    ('04', '14'): 'Miami',
+    ('04', '16'): 'Columbia',
+    ('04', '19'): 'Greensboro',
+    ('04', '26'): 'Jackson',
+    ('04', '29'): 'Jacksonville',
+    ('04', '36'): 'Louisville',
+    ('04', '37'): 'Knoxville',
+    ('04', '46'): 'San Juan',
+    ('05', '01'): 'Chicago',
+    ('05', '16'): 'Columbus',
+    ('05', '28'): 'Detroit',
+    ('05', '36'): 'Indianapolis',
+    ('05', '39'): 'Milwaukee',
+    ('05', '46'): 'Minneapolis-Saint Paul',
+    ('06', '01'): 'Fort Worth',
+    ('06', '02'): 'Albuquerque',
+    ('06', '24'): 'Houston',
+    ('06', '37'): 'Little Rock',
+    ('06', '48'): 'New Orleans',
+    ('06', '56'): 'Oklahoma City',
+    ('06', '59'): 'San Antonio',
+    ('07', '01'): 'Kansas City',
+    ('07', '26'): 'Omaha',
+    ('07', '36'): 'St. Louis',
+    ('08', '01'): 'Denver',
+    ('09', '01'): 'San Francisco',
+    ('09', '08'): 'Honolulu',
+    ('09', '16'): 'Los Angeles',
+    ('10', '01'): 'Seattle',
+    ('10', '06'): 'Anchorage',
+    ('10', '16'): 'Portland'
+}
+
+
+
+
+
+# Create Totals DataFrame for Denominator Calculations
+TotalsDF = pd.DataFrame.from_dict({'TYPE': ['01', '02', '03', '04', '05','10','11'], 'Name': ['US TOTAL', 'TOTAL SMSAS','TOTAL METRO PLACES', 'TOTAL URBAN COUNTY CALC', "TOTAL METRO PLACES GRLAG","TOTAL STATE BALANCES","TOTAL INSULAR AREAS"],'POP':[],'POV':[],'OCROWD':[],'PRE40':[],'POP60':[],'GRLAG':[]}, orient='index').transpose()
+
+#Calculate Population in Totals Dataframe
+TotalsDF.loc[TotalsDF['TYPE'] == '01', ['POP']] = (MERGE[MERGE['CDBGTY']=="21"]['POP'].sum())
+TotalsDF.loc[TotalsDF['TYPE'] == '02', ['POP']] = (MERGE[MERGE['CDBGTY']=="30"]['POP'].sum())
+TotalsDF.loc[TotalsDF['TYPE'] == '03', ['POP']] = (MERGE[MERGE['CDBGTY']=="51"]['POP'].sum()+MERGE[MERGE['CDBGTY']=="52"]['POP'].sum())
+TotalsDF.loc[TotalsDF['TYPE'] == '04', ['POP']] = (MERGE[MERGE['CDBGTY']=="61"]['POP'].sum()) - (MERGE[(MERGE['CDBGTY']=="64")&(MERGE['UC']=="3")]['POP'].sum()) - (MERGE[(MERGE['CDBGTY']=="64")&(MERGE['UC']=="4")]['POP'].sum()) + (MERGE[(MERGE['CDBGTY']=="63")&(MERGE['UC']=="4")]['POP'].sum())-(MERGE[MERGE['CDBGTY']=="62"]['POP'].sum())
+TotalsDF.loc[TotalsDF['TYPE'] == '05', ['POP']] = (MERGE[(MERGE['CDBGTY']=="51")&(MERGE['POP60']>1)]['POP'].sum()+MERGE[(MERGE['CDBGTY']=="52")&(MERGE['POP60']>1)]['POP'].sum())
+TotalsDF.loc[TotalsDF['TYPE'] == '10', ['POP']] =((MERGE[MERGE['CDBGTY']=="21"]['POP'].sum().astype(int))-(MERGE[MERGE['CDBGTY']=="51"]['POP'].sum())-(MERGE[MERGE['CDBGTY']=="52"]['POP'].sum())-(MERGE[MERGE['CDBGTY']=="61"]['POP'].sum()) + (MERGE[(MERGE['CDBGTY']=="64")&(MERGE['UC']=="3")]['POP'].sum()) + (MERGE[(MERGE['CDBGTY']=="64")&(MERGE['UC']=="4")]['POP'].sum()) - (MERGE[(MERGE['CDBGTY']=="63")&(MERGE['UC']=="4")]['POP'].sum())+(MERGE[MERGE['CDBGTY']=="62"]['POP'].sum())-((MERGE[MERGE['CDBGTY']=="81"]['POP'].sum().astype(int))))
+
+#Calculate Poverty in Totals Dataframe
+TotalsDF.loc[TotalsDF['TYPE'] == '01', ['POV']] = (MERGE[MERGE['CDBGTY']=="21"]['POV'].sum().astype(int))
+TotalsDF.loc[TotalsDF['TYPE'] == '02', ['POV']] = (MERGE[MERGE['CDBGTY']=="30"]['POV'].sum())
+TotalsDF.loc[TotalsDF['TYPE'] == '03', ['POV']] = (MERGE[MERGE['CDBGTY']=="51"]['POV'].sum()+MERGE[MERGE['CDBGTY']=="52"]['POV'].sum())
+TotalsDF.loc[TotalsDF['TYPE'] == '04', ['POV']] = (MERGE[MERGE['CDBGTY']=="61"]['POV'].sum()) - (MERGE[(MERGE['CDBGTY']=="64")&(MERGE['UC']=="3")]['POV'].sum()) - (MERGE[(MERGE['CDBGTY']=="64")&(MERGE['UC']=="4")]['POV'].sum()) + (MERGE[(MERGE['CDBGTY']=="63")&(MERGE['UC']=="4")]['POV'].sum())-(MERGE[MERGE['CDBGTY']=="62"]['POV'].sum())
+TotalsDF.loc[TotalsDF['TYPE'] == '10', ['POV']] =((MERGE[MERGE['CDBGTY']=="21"]['POV'].sum().astype(int))-(MERGE[MERGE['CDBGTY']=="51"]['POV'].sum())-(MERGE[MERGE['CDBGTY']=="52"]['POV'].sum())-(MERGE[MERGE['CDBGTY']=="61"]['POV'].sum()) + (MERGE[(MERGE['CDBGTY']=="64")&(MERGE['UC']=="3")]['POV'].sum()) + (MERGE[(MERGE['CDBGTY']=="64")&(MERGE['UC']=="4")]['POV'].sum()) - (MERGE[(MERGE['CDBGTY']=="63")&(MERGE['UC']=="4")]['POV'].sum())+(MERGE[MERGE['CDBGTY']=="62"]['POV'].sum())-((MERGE[MERGE['CDBGTY']=="81"]['POV'].sum().astype(int))))
+
+#Calculate Overcrowded Housing in Totals Dataframe
+TotalsDF.loc[TotalsDF['TYPE'] == '01', ['OCROWD']] = (MERGE[MERGE['CDBGTY']=="21"]['OCROWD'].sum().astype(int))
+TotalsDF.loc[TotalsDF['TYPE'] == '02', ['OCROWD']] = (MERGE[MERGE['CDBGTY']=="30"]['OCROWD'].sum())
+TotalsDF.loc[TotalsDF['TYPE'] == '03', ['OCROWD']] = (MERGE[MERGE['CDBGTY']=="51"]['OCROWD'].sum()+MERGE[MERGE['CDBGTY']=="52"]['OCROWD'].sum())
+TotalsDF.loc[TotalsDF['TYPE'] == '04', ['OCROWD']] = (MERGE[MERGE['CDBGTY']=="61"]['OCROWD'].sum()) - (MERGE[(MERGE['CDBGTY']=="64")&(MERGE['UC']=="3")]['OCROWD'].sum()) - (MERGE[(MERGE['CDBGTY']=="64")&(MERGE['UC']=="4")]['OCROWD'].sum()) + (MERGE[(MERGE['CDBGTY']=="63")&(MERGE['UC']=="4")]['OCROWD'].sum())-(MERGE[MERGE['CDBGTY']=="62"]['OCROWD'].sum())
+TotalsDF.loc[TotalsDF['TYPE'] == '10', ['OCROWD']] =((MERGE[MERGE['CDBGTY']=="21"]['OCROWD'].sum().astype(int))-(MERGE[MERGE['CDBGTY']=="51"]['OCROWD'].sum())-(MERGE[MERGE['CDBGTY']=="52"]['OCROWD'].sum())-(MERGE[MERGE['CDBGTY']=="61"]['OCROWD'].sum()) + (MERGE[(MERGE['CDBGTY']=="64")&(MERGE['UC']=="3")]['OCROWD'].sum()) + (MERGE[(MERGE['CDBGTY']=="64")&(MERGE['UC']=="4")]['OCROWD'].sum()) - (MERGE[(MERGE['CDBGTY']=="63")&(MERGE['UC']=="4")]['OCROWD'].sum())+(MERGE[MERGE['CDBGTY']=="62"]['OCROWD'].sum())-((MERGE[MERGE['CDBGTY']=="81"]['OCROWD'].sum().astype(int))))
+
+#Calculate Pre40 in Totals Dataframe
+TotalsDF.loc[TotalsDF['TYPE'] == '01', ['PRE40']] = (MERGE[MERGE['CDBGTY']=="21"]['PRE40'].sum().astype(int))
+TotalsDF.loc[TotalsDF['TYPE'] == '02', ['PRE40']] = (MERGE[MERGE['CDBGTY']=="30"]['PRE40'].sum())
+TotalsDF.loc[TotalsDF['TYPE'] == '03', ['PRE40']] = (MERGE[MERGE['CDBGTY']=="51"]['PRE40'].sum()+MERGE[MERGE['CDBGTY']=="52"]['PRE40'].sum())
+TotalsDF.loc[TotalsDF['TYPE'] == '04', ['PRE40']] = (MERGE[MERGE['CDBGTY']=="61"]['PRE40'].sum()) - (MERGE[(MERGE['CDBGTY']=="64")&(MERGE['UC']=="3")]['PRE40'].sum()) - (MERGE[(MERGE['CDBGTY']=="64")&(MERGE['UC']=="4")]['PRE40'].sum()) + (MERGE[(MERGE['CDBGTY']=="63")&(MERGE['UC']=="4")]['PRE40'].sum())-(MERGE[MERGE['CDBGTY']=="62"]['PRE40'].sum())
+TotalsDF.loc[TotalsDF['TYPE'] == '10', ['PRE40']] =(MERGE[MERGE['CDBGTY']=="21"]['PRE40'].sum().astype(int))-(MERGE[MERGE['CDBGTY']=="51"]['PRE40'].sum()+MERGE[MERGE['CDBGTY']=="52"]['PRE40'].sum())-((MERGE[MERGE['CDBGTY']=="61"]['PRE40'].sum()) - (MERGE[(MERGE['CDBGTY']=="64")&(MERGE['UC']=="3")]['PRE40'].sum()) - (MERGE[(MERGE['CDBGTY']=="64")&(MERGE['UC']=="4")]['PRE40'].sum()) + (MERGE[(MERGE['CDBGTY']=="63")&(MERGE['UC']=="4")]['PRE40'].sum())-(MERGE[MERGE['CDBGTY']=="62"]['PRE40'].sum()))-((MERGE[MERGE['CDBGTY']=="81"]['PRE40'].sum().astype(int)))
+
+#Calculate POP60 in Totals Dataframe
+TotalsDF.loc[TotalsDF['TYPE'] == '03', ['POP60']] = (MERGE[MERGE['CDBGTY']=="51"]['POP60'].sum()+MERGE[MERGE['CDBGTY']=="52"]['POP60'].sum())
+TotalsDF.loc[TotalsDF['TYPE'] == '04', ['POP60']] = (MERGE[MERGE['CDBGTY']=="61"]['POP60'].sum()) - (MERGE[(MERGE['CDBGTY']=="64")&(MERGE['UC']=="3")]['POP60'].sum()) - (MERGE[(MERGE['CDBGTY']=="64")&(MERGE['UC']=="4")]['POP60'].sum()) + (MERGE[(MERGE['CDBGTY']=="63")&(MERGE['UC']=="4")]['POP60'].sum())-(MERGE[MERGE['CDBGTY']=="62"]['POP60'].sum())
+TotalsDF.loc[TotalsDF['TYPE'] == '05', ['POP60']] = (MERGE[(MERGE['CDBGTY']=="51")&(MERGE['POP60']>1)]['POP60'].sum()+MERGE[(MERGE['CDBGTY']=="52")&(MERGE['POP60']>1)]['POP60'].sum())
+
+#Create Calc Dataframe to Calculate allocations:
+CalcDF = MERGE[(MERGE['CDBGTY']=="21")&(MERGE['CDBGFLAG']=="C")|(MERGE['CDBGTY']=="51")&(MERGE['CDBGFLAG']=="C")|(MERGE['CDBGTY']=="52")|(MERGE['CDBGTY']=="61")&(MERGE['CDBGFLAG']=="C")]
+
+#Add more Columns to Calc Sheet and Key MERGE
+CalcDF = CalcDF.assign(POPADJ=(0),GRLAG=0, FORMA=0, FORMB=0, AB=0, ABTEXT="A/B",GA=0, TYPE="", KEY="", POPformula=0,POVformula=0, PRE40formula=0,OCROWDformula=0,GRLAGformula=0,ROFO="")
+CalcDF['KEY']=CalcDF['ST']+CalcDF['CDBGHPL']
+CalcDF.loc[CalcDF['CDBGTY'] == '21', ['KEY']] = CalcDF['ST']+"9999"
+MERGE = MERGE.assign(KEY=MERGE['ST']+MERGE['CDBGHPL'])
+
+# Calculate Urban Counties on Calc Sheet
+for x in (CalcDF[CalcDF['CDBGTY'] == '61'])['KEY']:
+    ((CalcDF.loc[(CalcDF['KEY'] == x)&(CalcDF['CDBGTY'] == "61"), ['POP']])) -= (MERGE[(MERGE['CDBGTY']=="62")&(MERGE['KEY']== x)]['POP'].sum()) + (MERGE[(MERGE['CDBGTY']=="64")&(MERGE['UC']=="3")&(MERGE['KEY']==x)]['POP'].sum()) + (MERGE[(MERGE['CDBGTY']=="64")&(MERGE['UC']=="4")&(MERGE['KEY']==x)]['POP'].sum())- (MERGE[(MERGE['CDBGTY']=="63")&(MERGE['UC']=="4")&(MERGE['KEY']==x)]['POP'].sum())
+    ((CalcDF.loc[(CalcDF['KEY'] == x)&(CalcDF['CDBGTY'] == "61"), ['POP60']])) -= (MERGE[(MERGE['CDBGTY']=="62")&(MERGE['KEY']== x)]['POP60'].sum()) + (MERGE[(MERGE['CDBGTY']=="64")&(MERGE['UC']=="3")&(MERGE['KEY']==x)]['POP60'].sum()) + (MERGE[(MERGE['CDBGTY']=="64")&(MERGE['UC']=="4")&(MERGE['KEY']==x)]['POP60'].sum())- (MERGE[(MERGE['CDBGTY']=="63")&(MERGE['UC']=="4")&(MERGE['KEY']==x)]['POP60'].sum())
+    ((CalcDF.loc[(CalcDF['KEY'] == x)&(CalcDF['CDBGTY'] == "61"), ['POP80A']])) -= (MERGE[(MERGE['CDBGTY']=="62")&(MERGE['KEY']== x)]['POP80A'].sum()) + (MERGE[(MERGE['CDBGTY']=="64")&(MERGE['UC']=="3")&(MERGE['KEY']==x)]['POP80A'].sum()) + (MERGE[(MERGE['CDBGTY']=="64")&(MERGE['UC']=="4")&(MERGE['KEY']==x)]['POP80A'].sum())- (MERGE[(MERGE['CDBGTY']=="63")&(MERGE['UC']=="4")&(MERGE['KEY']==x)]['POP80A'].sum())
+    ((CalcDF.loc[(CalcDF['KEY'] == x)&(CalcDF['CDBGTY'] == "61"), ['CUBANS']])) -= (MERGE[(MERGE['CDBGTY']=="62")&(MERGE['KEY']== x)]['CUBANS'].sum()) + (MERGE[(MERGE['CDBGTY']=="64")&(MERGE['UC']=="3")&(MERGE['KEY']==x)]['CUBANS'].sum()) + (MERGE[(MERGE['CDBGTY']=="64")&(MERGE['UC']=="4")&(MERGE['KEY']==x)]['CUBANS'].sum())- (MERGE[(MERGE['CDBGTY']=="63")&(MERGE['UC']=="4")&(MERGE['KEY']==x)]['CUBANS'].sum())
+    ((CalcDF.loc[(CalcDF['KEY'] == x)&(CalcDF['CDBGTY'] == "61"), ['POP80T']])) -= (MERGE[(MERGE['CDBGTY']=="62")&(MERGE['KEY']== x)]['POP80T'].sum()) + (MERGE[(MERGE['CDBGTY']=="64")&(MERGE['UC']=="3")&(MERGE['KEY']==x)]['POP80T'].sum()) + (MERGE[(MERGE['CDBGTY']=="64")&(MERGE['UC']=="4")&(MERGE['KEY']==x)]['POP80T'].sum())- (MERGE[(MERGE['CDBGTY']=="63")&(MERGE['UC']=="4")&(MERGE['KEY']==x)]['POP80T'].sum())
+    ((CalcDF.loc[(CalcDF['KEY'] == x)&(CalcDF['CDBGTY'] == "61"), ['POV']])) -= (MERGE[(MERGE['CDBGTY']=="62")&(MERGE['KEY']== x)]['POV'].sum()) + (MERGE[(MERGE['CDBGTY']=="64")&(MERGE['UC']=="3")&(MERGE['KEY']==x)]['POV'].sum()) + (MERGE[(MERGE['CDBGTY']=="64")&(MERGE['UC']=="4")&(MERGE['KEY']==x)]['POV'].sum())- (MERGE[(MERGE['CDBGTY']=="63")&(MERGE['UC']=="4")&(MERGE['KEY']==x)]['POV'].sum())
+    ((CalcDF.loc[(CalcDF['KEY'] == x)&(CalcDF['CDBGTY'] == "61"), ['OCROWD']])) -= (MERGE[(MERGE['CDBGTY']=="62")&(MERGE['KEY']== x)]['OCROWD'].sum()) + (MERGE[(MERGE['CDBGTY']=="64")&(MERGE['UC']=="3")&(MERGE['KEY']==x)]['OCROWD'].sum()) + (MERGE[(MERGE['CDBGTY']=="64")&(MERGE['UC']=="4")&(MERGE['KEY']==x)]['OCROWD'].sum())- (MERGE[(MERGE['CDBGTY']=="63")&(MERGE['UC']=="4")&(MERGE['KEY']==x)]['OCROWD'].sum())
+    ((CalcDF.loc[(CalcDF['KEY'] == x)&(CalcDF['CDBGTY'] == "61"), ['PRE40']])) -= (MERGE[(MERGE['CDBGTY']=="62")&(MERGE['KEY']== x)]['PRE40'].sum()) + (MERGE[(MERGE['CDBGTY']=="64")&(MERGE['UC']=="3")&(MERGE['KEY']==x)]['PRE40'].sum()) + (MERGE[(MERGE['CDBGTY']=="64")&(MERGE['UC']=="4")&(MERGE['KEY']==x)]['PRE40'].sum())- (MERGE[(MERGE['CDBGTY']=="63")&(MERGE['UC']=="4")&(MERGE['KEY']==x)]['PRE40'].sum())
+    ((CalcDF.loc[(CalcDF['KEY'] == x)&(CalcDF['CDBGTY'] == "61"), ['POVU']])) -= (MERGE[(MERGE['CDBGTY']=="62")&(MERGE['KEY']== x)]['POVU'].sum()) + (MERGE[(MERGE['CDBGTY']=="64")&(MERGE['UC']=="3")&(MERGE['KEY']==x)]['POVU'].sum()) + (MERGE[(MERGE['CDBGTY']=="64")&(MERGE['UC']=="4")&(MERGE['KEY']==x)]['POVU'].sum())- (MERGE[(MERGE['CDBGTY']=="63")&(MERGE['UC']=="4")&(MERGE['KEY']==x)]['POVU'].sum())
+# Calculate States on Calc Sheet
+for x in (CalcDF[CalcDF['CDBGTY'] == '21'])['ST']:
+        ((CalcDF.loc[(CalcDF['ST'] == x)&(CalcDF['CDBGTY'] == "21"), ['POP']]))-= (CalcDF[(CalcDF['CDBGTY']=="51")&(CalcDF['ST']==x)]['POP'].sum())+(CalcDF[(CalcDF['CDBGTY']=="52")&(CalcDF['ST']==x)]['POP'].sum())+(CalcDF[(CalcDF['CDBGTY']=="61")&(CalcDF['ST']==x)]['POP'].sum()) + (MERGE[(MERGE['ST']==x)&(MERGE['CDBGTY']=="81")]['POP'].sum())
+        ((CalcDF.loc[(CalcDF['ST'] == x)&(CalcDF['CDBGTY'] == "21"), ['OCROWD']]))-= (CalcDF[(CalcDF['CDBGTY']=="51")&(CalcDF['ST']==x)]['OCROWD'].sum())+(CalcDF[(CalcDF['CDBGTY']=="52")&(CalcDF['ST']==x)]['OCROWD'].sum())+(CalcDF[(CalcDF['CDBGTY']=="61")&(CalcDF['ST']==x)]['OCROWD'].sum()) + (MERGE[(MERGE['ST']==x)&(MERGE['CDBGTY']=="81")]['OCROWD'].sum())
+        ((CalcDF.loc[(CalcDF['ST'] == x)&(CalcDF['CDBGTY'] == "21"), ['POV']]))-= (CalcDF[(CalcDF['CDBGTY']=="51")&(CalcDF['ST']==x)]['POV'].sum())+(CalcDF[(CalcDF['CDBGTY']=="52")&(CalcDF['ST']==x)]['POV'].sum())+(CalcDF[(CalcDF['CDBGTY']=="61")&(CalcDF['ST']==x)]['POV'].sum()) + (MERGE[(MERGE['ST']==x)&(MERGE['CDBGTY']=="81")]['POV'].sum())
+        ((CalcDF.loc[(CalcDF['ST'] == x)&(CalcDF['CDBGTY'] == "21"), ['PRE40']]))-= (CalcDF[(CalcDF['CDBGTY']=="51")&(CalcDF['ST']==x)]['PRE40'].sum())+(CalcDF[(CalcDF['CDBGTY']=="52")&(CalcDF['ST']==x)]['PRE40'].sum())+(CalcDF[(CalcDF['CDBGTY']=="61")&(CalcDF['ST']==x)]['PRE40'].sum()) + (MERGE[(MERGE['ST']==x)&(MERGE['CDBGTY']=="81")]['PRE40'].sum())
+        ((CalcDF.loc[(CalcDF['ST'] == x)&(CalcDF['CDBGTY'] == "21"), ['POVU']]))-= (CalcDF[(CalcDF['CDBGTY']=="51")&(CalcDF['ST']==x)]['POVU'].sum())+(CalcDF[(CalcDF['CDBGTY']=="52")&(CalcDF['ST']==x)]['POVU'].sum())+(CalcDF[(CalcDF['CDBGTY']=="61")&(CalcDF['ST']==x)]['POVU'].sum()) + (MERGE[(MERGE['ST']==x)&(MERGE['CDBGTY']=="81")]['POVU'].sum())
+
+#Calculate Adjusted Growth Lag Factor
+CalcDF.loc[CalcDF['AGL'] == '1', ['POPADJ']] = round(CalcDF['POP']*((CalcDF['POP80T'])/(CalcDF['POP80A'])), 0)
+
+# Calculate Growth Lag
+MSAGrowthRate=((TotalsDF.iloc[4]['POP'])/(TotalsDF.iloc[4]['POP60']))
+CalcDF['GRLAG']=round((CalcDF['POP60']*MSAGrowthRate)-CalcDF['POP'],0)
+CalcDF.loc[CalcDF['POPADJ']>1,'GRLAG']=round((CalcDF['POP60']*MSAGrowthRate)-CalcDF['POPADJ'],0)
+CalcDF.loc[CalcDF['GRLAG']<0,'GRLAG']=0
+
+# Calculate Formula "A" For Metro Cities and Urban Counties
+EntitlementAPOPUnitValue = (.25*(EntitlementFunding/(TotalsDF.iloc[1]['POP']))).copy()
+EntitlementAPOVUnitValue = (.50*(EntitlementFunding/(TotalsDF.iloc[1]['POV']))).copy()
+EntitlementAOCROWDUnitValue = (.25*(EntitlementFunding/(TotalsDF.iloc[1]['OCROWD']))).copy()
+
+
+# Ensure the target column 'FORMA' is of float dtype
+CalcDF['FORMA'] = CalcDF['FORMA'].astype(float)
+# Perform the assignment with type conversion
+CalcDF.loc[(CalcDF['CDBGTY'].isin(["51", "52", "61"])), 'FORMA'] = (CalcDF['POP'].astype(float) * EntitlementAPOPUnitValue + CalcDF['POV'].astype(float) * EntitlementAPOVUnitValue + CalcDF['OCROWD'].astype(float) * EntitlementAOCROWDUnitValue)
+
+# Calculate Formula "B" For Metro Cities
+TotalsDF.loc[TotalsDF['TYPE'] == '03', ['GRLAG']] = (CalcDF[CalcDF['CDBGTY']=="51"]['GRLAG'].sum())+(CalcDF[CalcDF['CDBGTY']=="52"]['GRLAG'].sum())
+CitiesBPOVUnitValue = (.30*(EntitlementFunding/(TotalsDF.iloc[1]['POV'])))
+CitiesBPRE40UnitValue = (.50*(EntitlementFunding/(TotalsDF.iloc[1]['PRE40'])))
+CitiesBGRLAGUnitValue = (.20*(EntitlementFunding/(TotalsDF.iloc[2]['GRLAG'])))
+# CalcDF.loc[(CalcDF['CDBGTY']=="51")|(CalcDF['CDBGTY']=="52"),'FORMB'] =(CalcDF['POV']*CitiesBPOVUnitValue)+(CalcDF['PRE40']*CitiesBPRE40UnitValue)+(CalcDF['GRLAG']*CitiesBGRLAGUnitValue)
+
+
+# Ensure the target column 'FORMB' is of float dtype
+CalcDF['FORMB'] = CalcDF['FORMB'].astype(float)
+# Perform the assignment with type conversion
+CalcDF.loc[(CalcDF['CDBGTY'].isin(["51", "52"])), 'FORMB'] = (CalcDF['POV'].astype(float) * CitiesBPOVUnitValue + CalcDF['PRE40'].astype(float) * CitiesBPRE40UnitValue + CalcDF['GRLAG'].astype(float) * CitiesBGRLAGUnitValue)
+
+# Calculate Formula "B" For Urban Counties
+TotalsDF.loc[TotalsDF['TYPE'] == '04', ['GRLAG']] = (CalcDF[CalcDF['CDBGTY']=="61"]['GRLAG'].sum())+(CalcDF[CalcDF['CDBGTY']=="51"]['GRLAG'].sum())+(CalcDF[CalcDF['CDBGTY']=="52"]['GRLAG'].sum())
+UrbanCountyBGRLAGUnitValue = (.20*(EntitlementFunding/(TotalsDF.iloc[3]['GRLAG'])))
+CalcDF.loc[(CalcDF['CDBGTY']=="61"),'FORMB'] =(CalcDF['POV']*CitiesBPOVUnitValue)+(CalcDF['PRE40']*CitiesBPRE40UnitValue)+(CalcDF['GRLAG']*UrbanCountyBGRLAGUnitValue)
+
+# Calculate Formula "A" For States
+StatesAPOPUnitValue = (.25*(NonEntitlementFunding/(TotalsDF.iloc[5]['POP'])))
+StatesAPOVUnitValue = (.50*(NonEntitlementFunding/(TotalsDF.iloc[5]['POV'])))
+StatesAOCROWDUnitValue = (.25*(NonEntitlementFunding/(TotalsDF.iloc[5]['OCROWD'])))
+CalcDF.loc[(CalcDF['CDBGTY']=="21"),'FORMA'] = (CalcDF['POP']*StatesAPOPUnitValue)+(CalcDF['POV']*StatesAPOVUnitValue)+(CalcDF['OCROWD']*StatesAOCROWDUnitValue)
+
+# Calculate Formula "B" For States
+StatesBPOPUnitValue = (.20*(NonEntitlementFunding/(TotalsDF.iloc[5]['POP'])))
+StatesBPOVUnitValue = (.30*(NonEntitlementFunding/(TotalsDF.iloc[5]['POV'])))
+StatesBPRE40UnitValue = (.50*(NonEntitlementFunding/(TotalsDF.iloc[5]['PRE40'])))
+CalcDF.loc[(CalcDF['CDBGTY']=="21"),'FORMB'] = (CalcDF['POP']*StatesBPOPUnitValue)+(CalcDF['POV']*StatesBPOVUnitValue)+(CalcDF['PRE40']*StatesBPRE40UnitValue)
+
+#Pro Rata Reduce and Populate Grant Amount ("GA") drop "AB" column
+CalcDF["AB"] = CalcDF[["FORMA", "FORMB"]].max(axis=1)
+StatePRR = (NonEntitlementFunding/((CalcDF[(CalcDF['CDBGTY']=="21")]['AB'].sum())))
+CalcDF.loc[CalcDF['CDBGTY'] == '21', ['GA']] = round((CalcDF['AB']*StatePRR),0)
+EntitlementPRR = (EntitlementFunding/((CalcDF[(CalcDF['CDBGTY']!="21")]['AB'].sum())))
+CalcDF.loc[CalcDF['CDBGTY'] != '21', ['GA']] = round((CalcDF['AB']*EntitlementPRR),0)
+CalcDF.loc[CalcDF['CDBGTY'] != '21', ['AB']] = round((CalcDF['AB']*EntitlementPRR),0)
+CalcDF.loc[CalcDF['CDBGTY'] != '21', ['FORMA']] = round((CalcDF['FORMA']*EntitlementPRR),0)
+CalcDF.loc[CalcDF['CDBGTY'] != '21', ['FORMB']] = round((CalcDF['FORMB']*EntitlementPRR),0)
+CalcDF.loc[CalcDF['CDBGTY'] == '21', ['FORMA']] = round((CalcDF['FORMA']),0)
+CalcDF.loc[CalcDF['CDBGTY'] == '21', ['FORMB']] = round((CalcDF['FORMB']),0)
+CalcDF.drop('AB', axis=1, inplace=True)
+
+# Update A/B Text
+CalcDF.loc[CalcDF['FORMA']>CalcDF['FORMB'],'ABTEXT']="A"
+CalcDF.loc[CalcDF['FORMA']<CalcDF['FORMB'],'ABTEXT']="B"
+
+# Make Rounding Adjustments to NYC and TX final Grant Amounts (GA)
+NYCRoundingAmt=  EntitlementFunding - (CalcDF[CalcDF['CDBGTY']!="21"]['GA'].sum())
+CalcDF.loc[CalcDF['KEY'] == '364436', ['GA']] -= (CalcDF[CalcDF['CDBGTY']!="21"]['GA'].sum()) - EntitlementFunding
+TXRoundingAmt =  NonEntitlementFunding-(CalcDF[CalcDF['CDBGTY']=="21"]['GA'].sum())
+CalcDF.loc[CalcDF['KEY'] == '489999', ['GA']] -= (CalcDF[CalcDF['CDBGTY']=="21"]['GA'].sum()) - NonEntitlementFunding
+
+# Update POPformula, POVfomrula, PRE40formula, GRLAGformula to show funding per factor:
+# Ensure the target columns are of float dtype
+CalcDF['POPformula'] = CalcDF['POPformula'].astype(float)
+CalcDF['POVformula'] = CalcDF['POVformula'].astype(float)
+CalcDF['OCROWDformula'] = CalcDF['OCROWDformula'].astype(float)
+CalcDF['PRE40formula'] = CalcDF['PRE40formula'].astype(float)
+CalcDF['GRLAGformula'] = CalcDF['GRLAGformula'].astype(float)
+
+# Perform the assignments with type conversion
+CalcDF.loc[(CalcDF['CDBGTY'] != "21") & (CalcDF['ABTEXT'] == "A"), 'POPformula'] = round(CalcDF['POP'].astype(float) * EntitlementAPOPUnitValue * EntitlementPRR, 2)
+CalcDF.loc[(CalcDF['CDBGTY'] != "21") & (CalcDF['ABTEXT'] == "A"), 'POVformula'] = round(CalcDF['POV'].astype(float) * EntitlementAPOVUnitValue * EntitlementPRR, 2)
+CalcDF.loc[(CalcDF['CDBGTY'] != "21") & (CalcDF['ABTEXT'] == "A"), 'OCROWDformula'] = round(CalcDF['OCROWD'].astype(float) * EntitlementAOCROWDUnitValue * EntitlementPRR, 2)
+CalcDF.loc[(CalcDF['CDBGTY'] != "21") & (CalcDF['ABTEXT'] == "B"), 'POVformula'] = round(CalcDF['POV'].astype(float) * CitiesBPOVUnitValue * EntitlementPRR, 2)
+CalcDF.loc[(CalcDF['CDBGTY'] != "21") & (CalcDF['ABTEXT'] == "B"), 'PRE40formula'] = round(CalcDF['PRE40'].astype(float) * CitiesBPRE40UnitValue * EntitlementPRR, 2)
+CalcDF.loc[(CalcDF['CDBGTY'] == "61") & (CalcDF['ABTEXT'] == "B"), 'GRLAGformula'] = round(CalcDF['GRLAG'].astype(float) * UrbanCountyBGRLAGUnitValue * EntitlementPRR, 2)
+CalcDF.loc[((CalcDF['CDBGTY'] == "51") & (CalcDF['ABTEXT'] == "B")) | ((CalcDF['CDBGTY'] == "52") & (CalcDF['ABTEXT'] == "B")), 'GRLAGformula'] = round(CalcDF['GRLAG'].astype(float) * CitiesBGRLAGUnitValue * EntitlementPRR, 2)
+CalcDF.loc[(CalcDF['CDBGTY'] == "21") & (CalcDF['ABTEXT'] == "A"), 'POPformula'] = round(CalcDF['POP'].astype(float) * StatesAPOPUnitValue * StatePRR, 2)
+CalcDF.loc[(CalcDF['CDBGTY'] == "21") & (CalcDF['ABTEXT'] == "A"), 'POVformula'] = round(CalcDF['POV'].astype(float) * StatesAPOVUnitValue * StatePRR, 2)
+CalcDF.loc[(CalcDF['CDBGTY'] == "21") & (CalcDF['ABTEXT'] == "A"), 'OCROWDformula'] = round(CalcDF['OCROWD'].astype(float) * StatesAOCROWDUnitValue * StatePRR, 2)
+CalcDF.loc[(CalcDF['CDBGTY'] == "21") & (CalcDF['ABTEXT'] == "B"), 'POPformula'] = round(CalcDF['POP'].astype(float) * StatesBPOPUnitValue * StatePRR, 2)
+CalcDF.loc[(CalcDF['CDBGTY'] == "21") & (CalcDF['ABTEXT'] == "B"), 'PRE40formula'] = round(CalcDF['PRE40'].astype(float) * StatesBPRE40UnitValue * StatePRR, 2)
+CalcDF.loc[(CalcDF['CDBGTY'] == "21") & (CalcDF['ABTEXT'] == "B"), 'POVformula'] = round(CalcDF['POV'].astype(float) * StatesBPOVUnitValue * StatePRR, 2)
+
+#Rounding Adjustmnet to Common Factor
+CalcDF["POVformula"] = (CalcDF["GA"] -CalcDF["POPformula"] -CalcDF["OCROWDformula"]-CalcDF["PRE40formula"]-CalcDF["GRLAGformula"])
+CalcDF["FORMA"] = (CalcDF["POPformula"] + CalcDF["POVformula"] +CalcDF["OCROWDformula"])
+CalcDF["FORMB"] = (CalcDF["POPformula"] + CalcDF["POVformula"] +CalcDF["PRE40formula"]+CalcDF["GRLAGformula"])
+
+# Move Jefferson County GA$ to Louisville-CDBG
+CalcDF.loc[CalcDF['KEY'] == '211374', ['GA']] += CalcDF.loc[CalcDF['KEY'] == '219111', ['GA']].sum()
+CalcDF.loc[CalcDF['KEY'] == '211374', ['ABTEXT']] = "B+A"
+CalcDF.loc[CalcDF['KEY'] == '219111', ['GA']] = 0
+
+# Update DC TY21 ABTEXT to "N/A"
+CalcDF.loc[CalcDF['KEY'] == '119999', ['ABTEXT']] = "N/A"
+
+# Update Type Text
+CalcDF.loc[CalcDF['CDBGTY'] == '21', ['TYPE']] =  "State Non-entitlement"
+CalcDF.loc[CalcDF['CDBGTY'] == '51', ['TYPE']] = "Principal City"
+CalcDF.loc[CalcDF['CDBGTY'] == '52', ['TYPE']] = "Metro City"
+CalcDF.loc[CalcDF['CDBGTY'] == '61', ['TYPE']] = "Urban County"
+
+#Change State CDBGTY=21 to CDBGTY= TY22 (expected)
+CalcDF.loc[CalcDF['CDBGTY'] == '21', ['CDBGTY']] = "22"
+
+# Rename Pop Year column on Calc Sheet, renamne "statebreak" to "state".
+CalcDF.rename(columns={"POP":POPYearCurrent},inplace = True)
+CalcDF.rename(columns={"STATEBREAK":"STATE"},inplace = True)
+CalcDF.rename(columns={"CDBGTY":"TY"},inplace = True)
+
+# Rename funding Per Factor Column
+CalcDF.rename(columns={"POPformula":"$Pop"},inplace = True)
+CalcDF.rename(columns={"POVformula":"$Pov"},inplace = True)
+CalcDF.rename(columns={"OCROWDformula":"$OCrowd"},inplace = True)
+CalcDF.rename(columns={"PRE40formula":"$Pre40"},inplace = True)
+CalcDF.rename(columns={"GRLAGformula":"$GrLag"},inplace = True)
+CalcDF.rename(columns={"ABTEXT":"AB"},inplace = True)
+
+#Concatenate Region and Field Office Codes
+CalcDF["ROFO"] = CalcDF["RGN"]+CalcDF["FO"]
+
+#Update Field Office Name Text
+#CalcDF = pd.merge(CalcDF,CPDFieldOfficeNames[['ROFO', 'NameProper']], on='ROFO', how='left')
+#CalcDF['FOName'] = CalcDF["NameProper"]
+CalcDF['FOName'] = CalcDF.apply(lambda row: CPDFieldOfficeNames.get((row['RGN'], row['FO'])), axis=1)
+
+# Export to Excel
+CalcDF.loc[:,("KEY","RGN","FO","NAME","STA","TYPE","GA","MA", "JOINT","POP60", "POP80A", "POP80T", POPYearCurrent, "POPADJ", "GRLAG","POV","POVU","OCROWD","PRE40","FORMA", "FORMB", "AB",  "$Pop", "$Pov", "$OCrowd", "$Pre40", "$GrLag","STATE", "FIPSKEY","SUMLEV","TY","CYCLE","ROFO","FOName")].sort_values(by=('KEY')).to_excel(OutputFolder+OutputFilename, index=False, sheet_name='CDBG Calc')
+# The totals print to console, but also can export below:
+# TotalsDF.to_excel(OutputFolder+OutputFilename, sheet_name="UNIT VALUES")
+
+# Print Totals in Console:
+print("")
+print("CDBG Allocation Variable Totals:")
+print(TotalsDF)
+print("")
+print("MSA Growth Rate= "+((TotalsDF.iloc[4]['POP'])/(TotalsDF.iloc[4]['POP60'])).astype(str))
+print("State Non-entitlement Pro Rata Reduction= "+(StatePRR).astype(str))
+print("Entitlement Pro Rata Reduction= "+(EntitlementPRR).astype(str))
+print("")
+print("NYC Rounding Adjustment= $"+(NYCRoundingAmt).astype(str))
+print("TX State Rounding Adjustment= $"+(TXRoundingAmt).astype(str))
+print("")
+print("Exported to Excel at: "+OutputFolder+OutputFilename)
+print("")
+print("Runtime~ %s seconds" % round((time.time() - start_time),3))
+print("Calculation Complete! ♡")
+
+#### The End ♡ ######

@@ -1,0 +1,363 @@
+###########################################################
+###########################################################
+##     HUD/CPD/OPS/SDED: HOME CDL in Python!             ##
+##        Written by Abu Zuberi, May 2025                ##
+##        Updated by Abu Zuberi, May 2025                ##
+##                     ❀♡❀⊱✿⊰❀♡❀                    ##
+##     This program takes CPD-SDED's "MERGE" database    ##
+##   and outputs HOME Consortia Digital Library Files.   ##
+###########################################################
+###########################################################
+
+## User Input (1/4): MERGE Import Location:
+MERGELocation = 'J:/COMS/MERGE/MERGE FY25/MERGE.xlsx'
+
+## User Input (2/4): Set Output Folder/Filename:
+OutputFolder = 'C:/Users/H45562/Desktop/New Folder/' #for Abu
+#OutputFolder = 'C:/Users/H50930/OneDrive - US Department of Housing and Urban Development/Desktop/New folder/' #for Julie
+
+## User Input (3/4): Set Consortia Requalification Cycles:
+MERGE_Fiscal_Year = "2025"    
+CycleCode1 = "2026"
+CycleCode2 = "2027"
+CycleCode3 = "2025"
+
+## Optional define Column Widths
+Column1Width= 4
+Column2Width= 32
+Column3Width= 42
+Column4Width= 57
+
+##Note on annual cycle code updates in MERGE (for reference)
+"""
+    • ‘3’ is changed to ‘4’
+    • ‘1’ is changed to ‘3’
+    • ‘2’ is changed to ‘1’
+    • ‘4’ is changed to ‘2’
+"""
+###Update MERGE Population Year Column Name
+def find_max_pop_year_under_60(df):
+    """
+    Finds the column name with the maximum population year under 60 from a pandas DataFrame, without using regular expressions.
+
+    Args:
+        df (pd.DataFrame): The input DataFrame containing population year columns.
+
+    Returns:
+        str: The column name with the maximum population year, or None if no matching columns are found.
+    """
+    pop_years = [col for col in df.columns if col.startswith('POP') and col[3:].isdigit()] # find columns that start with POP and then digits
+    valid_years = [col for col in pop_years if int(col[3:]) < 60] # check if the year is below 60
+    if not valid_years:
+        return None  # No valid columns found
+    max_year = 0
+    max_year_column = None
+    for col in valid_years:
+        year_num = int(col[3:])
+        if year_num > max_year:
+            max_year = year_num
+            max_year_column = col
+    return max_year_column
+
+# import Pandas numerical analysis plug-ins, import time for timer:
+import time
+start_time = time.time()
+import pandas as pd
+# Tell Pandas not to truncate when printing:
+pd.options.display.max_columns = None
+pd.options.display.max_rows = None
+
+# Inform User that Calculation has started
+print("Preparing Consortia Digital Library Files......")
+
+# Import MERGE (assumes formatted as EXCEL.xlsx), ensure indexing fields are formatted as text
+MERGEIMPORT=pd.DataFrame(pd.read_excel(MERGELocation,converters={'HOMETY':str,'CDBGTY':str,'HOMEHPL':str,'CNSRTCYCLE':str,'ST':str,'CO':str, 'UC':str,'MA':str,'RGN':str,'FO':str,'CYCLE':str, 'AGL':str}))
+
+
+###Copy over ONLY consortia records
+MERGE= MERGEIMPORT
+MERGE = MERGE[MERGE['CNSRT'].notnull()].copy()
+MERGE = MERGE[MERGE['HOMEFLAG'] == 'H'].copy()
+
+
+# Remove year from Population column, i.e. "POP20" becomes "POP"
+# This is to reduce effort for annual updates.
+POPYearCurrent= find_max_pop_year_under_60(MERGE)
+MERGE.rename(columns={POPYearCurrent:"POP"},inplace = True)
+
+
+###Add CPD Field Office Data
+CPDFieldOfficeNames = {
+    ('01', '01'): 'Boston',
+    ('01', '26'): 'Hartford',
+    ('02', '01'): 'New York City',
+    ('02', '06'): 'Buffalo',
+    ('02', '39'): 'Newark',
+    ('03', '01'): 'Philadelphia',
+    ('03', '06'): 'Baltimore',
+    ('03', '28'): 'Pittsburgh',
+    ('03', '36'): 'Richmond',
+    ('03', '39'): 'Washington D.C.',
+    ('04', '01'): 'Atlanta',
+    ('04', '09'): 'Birmingham',
+    ('04', '14'): 'Miami',
+    ('04', '16'): 'Columbia',
+    ('04', '19'): 'Greensboro',
+    ('04', '26'): 'Jackson',
+    ('04', '29'): 'Jacksonville',
+    ('04', '36'): 'Louisville',
+    ('04', '37'): 'Knoxville',
+    ('04', '46'): 'San Juan',
+    ('05', '01'): 'Chicago',
+    ('05', '16'): 'Columbus',
+    ('05', '28'): 'Detroit',
+    ('05', '36'): 'Indianapolis',
+    ('05', '39'): 'Milwaukee',
+    ('05', '46'): 'Minneapolis-Saint Paul',
+    ('06', '01'): 'Fort Worth',
+    ('06', '02'): 'Albuquerque',
+    ('06', '24'): 'Houston',
+    ('06', '37'): 'Little Rock',
+    ('06', '48'): 'New Orleans',
+    ('06', '56'): 'Oklahoma City',
+    ('06', '59'): 'San Antonio',
+    ('07', '01'): 'Kansas City',
+    ('07', '26'): 'Omaha',
+    ('07', '36'): 'St. Louis',
+    ('08', '01'): 'Denver',
+    ('09', '01'): 'San Francisco',
+    ('09', '08'): 'Honolulu',
+    ('09', '16'): 'Los Angeles',
+    ('10', '01'): 'Seattle',
+    ('10', '06'): 'Anchorage',
+    ('10', '16'): 'Portland'
+}
+
+#Concatenate MERGE Region and Field Office Codes
+MERGE["ROFO"] = MERGE["RGN"]+MERGE["FO"]
+#Update MERGE Field Office Name Text
+MERGE['FOName'] = MERGE.apply(lambda row: CPDFieldOfficeNames.get((row['RGN'], row['FO'])), axis=1)
+
+###ADD Consortia_Name Column
+df_type_90 = MERGE[MERGE['HOMETY'] == "90"].copy()
+df_type_90['Consortia_Name'] = df_type_90['NAME']
+df_type_90['Consortia_STA'] = df_type_90['STA']
+MERGE = pd.merge(MERGE, df_type_90[['CNSRT', 'Consortia_Name', 'Consortia_STA']], on='CNSRT', how='left')
+MERGE['Consortia_Name'] = MERGE['Consortia_Name'].str.replace('CNSRT-', '', regex=False)
+
+###ADD County_Name Column
+df_type_60 = MERGE[MERGE['HOMETY'] == "61"].copy()
+df_type_60['County_Name'] = df_type_60['NAME']
+MERGE = pd.merge(MERGE, df_type_60[['ST', 'CO', 'County_Name']], on=['ST', 'CO'], how='left')
+
+###Add Headers
+MERGE['HEADER1'] = "FY " + MERGE_Fiscal_Year + " Members of " + MERGE['Consortia_Name'].astype(str) +" "+ MERGE['Consortia_STA'].astype(str)+ " Consortium - " + MERGE['CNSRT'].astype(str)
+MERGE.loc[MERGE['CNSRTCYCLE'] == "1", 'HEADER2'] = "Agreement Period Ends FY " + CycleCode1
+MERGE.loc[MERGE['CNSRTCYCLE'] == "2", 'HEADER2'] = "Agreement Period Ends FY " + CycleCode2
+MERGE.loc[MERGE['CNSRTCYCLE'] == "3", 'HEADER2'] = "Agreement Period Ends FY " + CycleCode3
+MERGE['HEADER3'] = MERGE['FOName']+ " Field Office"
+
+### Add Types
+MERGE.loc[MERGE['HOMETY'].astype(str).str.startswith('6'), 'Type'] = "Place within " + MERGE.loc[MERGE['HOMETY'].astype(str).str.startswith('6'), 'County_Name'].astype(str)
+MERGE.loc[(MERGE['CDBGFLAG'] == 'C') & (MERGE['HOMETY'] == "61"), 'Type'] = "CDBG Urban County"
+MERGE.loc[(MERGE['CDBGFLAG'].isnull()) & (MERGE['HOMETY'] == "61"), 'Type'] = "Unincorporated Part Of Non-CDBG County"
+MERGE.loc[(MERGE['CDBGFLAG'] == 'C') & (MERGE['CDBGTY'] == "51"), 'Type'] = "CDBG Principal City"
+MERGE.loc[(MERGE['CDBGFLAG'] == 'C') & (MERGE['CDBGTY'] == "52"), 'Type'] = "CDBG Metro City"
+MERGE.loc[(MERGE['CDBGFLAG'].isnull()) & (MERGE['HOMETY'] == "91"), 'Type'] = "City"
+MERGE.loc[(MERGE['CDBGFLAG'].isnull()) & (MERGE['HOMETY'] == "92"), 'Type'] = "City"
+MERGE.loc[(MERGE['CDBGFLAG'].isnull()) & (MERGE['HOMETY'] == "9P"), 'Type'] = "City"
+
+### Sort Ranks
+
+MERGE.loc[MERGE['HOMETY'].astype(str).str.startswith('6'), 'SORTRANK'] = 3 #Place Within Non-CDBG County
+MERGE.loc[(MERGE['CDBGFLAG'] == 'C') & (MERGE['HOMETY'] == "61"), 'SORTRANK'] = 3 #CDBG UC
+MERGE.loc[(MERGE['CDBGFLAG'].isnull()) & (MERGE['HOMETY'] == "61"), 'SORTRANK'] = 3 #Non-CDBG County balance "TY61"
+MERGE.loc[(MERGE['CDBGFLAG'] == 'C') & (MERGE['CDBGTY'] == "51"), 'SORTRANK'] = 1  # CDBG PC
+MERGE.loc[(MERGE['CDBGFLAG'] == 'C') & (MERGE['CDBGTY'] == "52"), 'SORTRANK'] = 1 # CDBG MC
+MERGE.loc[(MERGE['CDBGFLAG'].isnull()) & (MERGE['HOMETY'] == "91"), 'SORTRANK'] = 1 # non-CDBG city
+MERGE.loc[(MERGE['CDBGFLAG'].isnull()) & (MERGE['HOMETY'] == "92"), 'SORTRANK'] = 1 # non-CDBG city
+MERGE.loc[(MERGE['CDBGFLAG'].isnull()) & (MERGE['HOMETY'] == "9P"), 'SORTRANK'] = 1 # non-CDBG city
+
+
+### Drop Uneeded records
+MERGE = MERGE[MERGE['HOMETY'] != "90"].copy()
+MERGE = MERGE[MERGE['HOMETY'] != "62"].copy()
+MERGE = MERGE[~((MERGE['HOMETY'] == "64") & (MERGE['UC'] == "3"))].copy()
+MERGE = MERGE[~((MERGE['HOMETY'] == "64") & (MERGE['UC'] == "4"))].copy()
+MERGE = MERGE[~((MERGE['HOMETY'] == "63") & (MERGE['UC'] == "9"))].copy()
+MERGE = MERGE[~((MERGE['CDBGFLAG'] == "C") & (MERGE['CDBGTY'] == "63"))].copy()
+MERGE = MERGE[~((MERGE['CDBGFLAG'] == "C") & (MERGE['CDBGTY'] == "64"))].copy()
+
+#Add File Name
+MERGE['FILENAME'] = MERGE['Consortia_Name']+MERGE['Consortia_STA']+"part"
+MERGE['FILENAME'] = MERGE['FILENAME'].str.replace(r'[\s\.]', '', regex=True)
+MERGE['FILENAME'] = MERGE['FILENAME'].str.replace("County", "Co")
+
+#Sort MERGE file properly
+MERGE = MERGE.sort_values(by=['CNSRT', 'ST', 'SORTRANK', 'CO','HOMEHPL', 'HPL2', 'FIPSKEY'], ascending=True).copy()
+
+#### Create CDL Participation File    
+ #### Create CDL Participation File    
+  #### Create CDL Participation File    
+    #### Create CDL Participation File
+    
+import os
+from openpyxl import Workbook
+from openpyxl.styles import Font, Border, Side
+from openpyxl.utils import get_column_letter
+
+for filename in MERGE['FILENAME'].unique():
+    filepath = os.path.join(OutputFolder, f'{filename}.xlsx')
+    df_subset = MERGE[MERGE['FILENAME'] == filename]
+
+    header_data = pd.DataFrame({
+        'STA': [df_subset['HEADER1'].iloc[0],
+                df_subset['HEADER2'].iloc[0],
+                df_subset['HEADER3'].iloc[0],
+                '',
+                'STA'],
+        'NAME': ['', '', '', '', 'NAME'],
+        'Type': ['', '', '', '', 'TYPE']
+    })
+
+    # Ensure df_subset has the same columns and order as header_data
+    report_df = pd.concat([header_data, df_subset[['STA', 'NAME', 'Type']].reindex(columns=header_data.columns)], ignore_index=True)
+
+    # Create a new workbook and get the active sheet
+    wb = Workbook()
+    ws = wb.active
+    ws.title = filename
+
+    # Define a bold font style
+    bold_font = Font(bold=True)
+
+    # Define border style for gridlines
+    thin_border = Border(left=Side(style='thin'),
+                         right=Side(style='thin'),
+                         top=Side(style='thin'),
+                         bottom=Side(style='thin'))
+
+    # Write the DataFrame to the worksheet and apply borders to the table body
+    for r_idx, row in report_df.iterrows():
+        for c_idx, value in enumerate(row):
+            cell = ws.cell(row=r_idx + 1, column=c_idx + 1, value=value)
+            # Apply border to the table body (starting from the row after headers and blank row)
+            if r_idx >= 4:
+                cell.border = thin_border
+
+    # Merge and set the value for the first header row (and make it bold)
+    ws.merge_cells('A1:C1')
+    ws['A1'] = report_df.iloc[0, 0]
+    ws['A1'].font = bold_font
+
+    # Merge and set the value for the second header row (and make it bold)
+    ws.merge_cells('A2:C2')
+    ws['A2'] = report_df.iloc[1, 0]
+    ws['A2'].font = bold_font
+
+    # Merge and set the value for the third header row (and make it bold)
+    ws.merge_cells('A3:C3')
+    ws['A3'] = report_df.iloc[2, 0]
+    ws['A3'].font = bold_font
+
+    # Make the table headers ('STA', 'NAME', 'TYPE') bold
+    ws['A5'].font = bold_font
+    ws['B5'].font = bold_font
+    ws['C5'].font = bold_font
+
+    # Set column widths
+    ws.column_dimensions['A'].width = Column1Width
+    ws.column_dimensions['B'].width = Column2Width
+    ws.column_dimensions['C'].width = Column3Width
+
+    # Save the workbook
+    wb.save(filepath)
+
+#### Create CDL Working Files   
+ #### Create CDL Working Files       
+  #### Create CDL Working Files   
+    #### Create CDL Working Files         
+    
+    
+#Add File Name
+MERGE['FILENAME'] = MERGE['Consortia_Name']+MERGE['Consortia_STA']+"work"
+MERGE['FILENAME'] = MERGE['FILENAME'].str.replace(r'[\s\.]', '', regex=True)
+MERGE['FILENAME'] = MERGE['FILENAME'].str.replace("County", "Co")
+    
+for filename in MERGE['FILENAME'].unique():
+    filepath = os.path.join(OutputFolder, f'{filename}.xlsx')
+    df_subset = MERGE[MERGE['FILENAME'] == filename].copy()  # Create a copy
+
+    new_column_name = f"Participation changes for {int(MERGE_Fiscal_Year) + 1}"
+    df_subset[new_column_name] = ''  # Initialize the new column
+
+    header_data = pd.DataFrame({
+        'STA': [df_subset['HEADER1'].iloc[0] if not df_subset.empty and 'HEADER1' in df_subset.columns else '',
+                df_subset['HEADER2'].iloc[0] if not df_subset.empty and 'HEADER2' in df_subset.columns else '',
+                df_subset['HEADER3'].iloc[0] if not df_subset.empty and 'HEADER3' in df_subset.columns else '',
+                '',
+                'STA'],
+        'NAME': ['', '', '', '', 'NAME'],
+        'Type': ['', '', '', '', 'TYPE'],
+        new_column_name: ['', '', '', '', new_column_name]
+    })
+
+    # Define the desired column order
+    column_order = ['STA', 'NAME', 'Type', new_column_name]
+
+    # Ensure df_subset has the desired columns and order
+    report_df = pd.concat([header_data[column_order], df_subset[column_order].reindex(columns=header_data[column_order].columns)], ignore_index=True)
+
+    # Create a new workbook and get the active sheet
+    wb = Workbook()
+    ws = wb.active
+    ws.title = filename
+
+    # Define a bold font style
+    bold_font = Font(bold=True)
+
+    # Define border style for gridlines
+    thin_border = Border(left=Side(style='thin'),
+                         right=Side(style='thin'),
+                         top=Side(style='thin'),
+                         bottom=Side(style='thin'))
+
+    # Write the DataFrame to the worksheet and apply borders to the table body
+    for r_idx, row in report_df.iterrows():
+        for c_idx, value in enumerate(row):
+            cell = ws.cell(row=r_idx + 1, column=c_idx + 1, value=value)
+            # Apply border to the table body (starting from the row after headers and blank row)
+            if r_idx >= 4:
+                cell.border = thin_border
+
+    # Merge and set the value for the first header row (and make it bold)
+    ws.merge_cells(f'A1:{get_column_letter(len(column_order))}1')
+    ws[get_column_letter(1) + '1'] = report_df.iloc[0, 0]
+    ws[get_column_letter(1) + '1'].font = bold_font
+
+    # Merge and set the value for the second header row (and make it bold)
+    ws.merge_cells(f'A2:{get_column_letter(len(column_order))}2')
+    ws[get_column_letter(1) + '2'] = report_df.iloc[1, 0]
+    ws[get_column_letter(1) + '2'].font = bold_font
+
+    # Merge and set the value for the third header row (and make it bold)
+    ws.merge_cells(f'A3:{get_column_letter(len(column_order))}3')
+    ws[get_column_letter(1) + '3'] = report_df.iloc[2, 0]
+    ws[get_column_letter(1) + '3'].font = bold_font
+
+    # Make the table headers bold
+    for i, col in enumerate(column_order):
+        header_cell = ws[get_column_letter(i + 1) + '5']
+        header_cell.font = bold_font
+
+    # Set column widths
+    ws.column_dimensions['A'].width = Column1Width
+    ws.column_dimensions['B'].width = Column2Width
+    ws.column_dimensions['C'].width = Column3Width
+    ws.column_dimensions[get_column_letter(4)].width = Column4Width
+
+    # Save the workbook
+    wb.save(filepath)
+    
+# Inform User that process has completed
+print("Completed Preparing Consortia Digital Library Files!")
